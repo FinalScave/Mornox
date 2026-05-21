@@ -1,23 +1,129 @@
 #include "vanta/project/project_manager.h"
 
+#include <algorithm>
+#include <set>
 #include <utility>
 
+#include "vanta/language/language_service.h"
+#include "vanta/project/project.h"
 #include "vanta/workspace/workspace_context.h"
 
 namespace vanta {
 namespace {
 
-Json attachmentSummary(const SingleFileModel& model) {
-    return Json::object({
-        {"file", Json(model.file.toUri().string())},
-        {"languageId", Json(model.languageId)},
-        {"workingDirectory", Json(model.workingDirectory.string())},
+bool ShouldSkipDirectory(const VirtualFile& file) {
+    const std::string name = file.DisplayName();
+    return name == ".git" || name == ".vanta" || name == "build" || name == ".cache";
+}
+
+bool IsDirectory(const VirtualFile& file) {
+    return file.Valid() && file.Stat().kind == VirtualFileKind::Directory;
+}
+
+ProjectViewNode FileNode(const VirtualFile& file) {
+    const bool directory = IsDirectory(file);
+    std::string label = file.DisplayName();
+    if (label.empty()) {
+        label = file.ToUri().ToString();
+    }
+    return {
+        .id = file.ToUri().ToString(),
+        .label = std::move(label),
+        .kind = directory ? std::string(ProjectViewNodeKind::kDirectory) : std::string(ProjectViewNodeKind::kFile),
+        .icon = directory ? "folder" : "file",
+        .file = file,
+        .has_file = file.Valid(),
+        .has_children = directory,
+        .synthetic = false,
+    };
+}
+
+std::vector<VirtualFile> SortedVisibleChildren(const VirtualFile& directory) {
+    std::vector<VirtualFile> children;
+    for (const VirtualFile& child : directory.ListChildren()) {
+        if (IsDirectory(child) && ShouldSkipDirectory(child)) {
+            continue;
+        }
+        children.push_back(child);
+    }
+    std::sort(children.begin(), children.end(), [](const VirtualFile& left, const VirtualFile& right) {
+        const bool left_directory = IsDirectory(left);
+        const bool right_directory = IsDirectory(right);
+        if (left_directory != right_directory) {
+            return left_directory > right_directory;
+        }
+        return left.DisplayName() < right.DisplayName();
+    });
+    return children;
+}
+
+Value AttachmentSummary(const SingleFileModel& model) {
+    return Value::ObjectValue({
+        {"file", Value(model.file.ToUri().ToString())},
+        {"languageId", Value(model.language_id)},
+        {"workingDirectory", Value(model.working_directory.string())},
     });
 }
 
+Value AttachmentProjection(const SingleFileModel& model) {
+    return Value::ObjectValue({
+        {"file", Value(model.file.ToUri().ToString())},
+        {"languageId", Value(model.language_id)},
+        {"workingDirectory", Value(model.working_directory.string())},
+    });
 }
 
-bool ProjectModel::hasFacet(const std::string& type) const {
+class FilesProjectViewProvider final : public ProjectViewProvider {
+public:
+    std::string Id() const override {
+        return "vanta.files.projectViewProvider";
+    }
+
+    std::vector<ProjectView> Views(WorkspaceContext& context) const override {
+        if (!context.WorkspaceOpen()) {
+            return {};
+        }
+        return {{
+            .id = "vanta.files",
+            .title = "Files",
+            .icon = "files",
+            .priority = 0,
+        }};
+    }
+
+    std::vector<ProjectViewNode> TopLevelNodes(WorkspaceContext& context, const ProjectView&) override {
+        std::vector<ProjectViewNode> nodes;
+        std::set<std::string> seen;
+        const Project* project = context.CurrentProject();
+        if (project != nullptr) {
+            for (const ProjectModule& module : project->Model().modules) {
+                if (!module.content_root.Valid() || !seen.insert(module.content_root.ToUri().ToString()).second) {
+                    continue;
+                }
+                nodes.push_back(FileNode(module.content_root));
+            }
+        }
+        if (nodes.empty() && context.CurrentWorkspace().RootFile().Valid()) {
+            nodes.push_back(FileNode(context.CurrentWorkspace().RootFile()));
+        }
+        return nodes;
+    }
+
+    std::vector<ProjectViewNode> Children(WorkspaceContext&, const ProjectView&, const ProjectViewNode& parent) override {
+        if (!parent.has_file || !IsDirectory(parent.file)) {
+            return {};
+        }
+        std::vector<ProjectViewNode> nodes;
+        for (const VirtualFile& child : SortedVisibleChildren(parent.file)) {
+            nodes.push_back(FileNode(child));
+        }
+        return nodes;
+    }
+};
+
+}
+
+bool ProjectModel::HasFacet(const std::string& type) const {
     for (const ProjectFacet& facet : facets) {
         if (facet.type == type) {
             return true;
@@ -26,12 +132,12 @@ bool ProjectModel::hasFacet(const std::string& type) const {
     return false;
 }
 
-bool ProjectModel::hasAttachment(const std::string& id) const {
+bool ProjectModel::HasAttachment(const std::string& id) const {
     return attachments.contains(id);
 }
 
-std::optional<ProjectAttachmentInfo> ProjectModel::attachmentInfo(const std::string& id) const {
-    for (const ProjectAttachmentInfo& info : attachmentInfos) {
+std::optional<ProjectAttachmentInfo> ProjectModel::AttachmentInfo(const std::string& id) const {
+    for (const ProjectAttachmentInfo& info : attachment_infos) {
         if (info.id == id) {
             return info;
         }
@@ -44,30 +150,30 @@ ProjectModelBuilder::ProjectModelBuilder(ProjectOrigin origin, VirtualFile root)
     model_.root = std::move(root);
 }
 
-ProjectOrigin ProjectModelBuilder::origin() const {
+ProjectOrigin ProjectModelBuilder::Origin() const {
     return model_.origin;
 }
 
-const VirtualFile& ProjectModelBuilder::root() const {
+const VirtualFile& ProjectModelBuilder::Root() const {
     return model_.root;
 }
 
-bool ProjectModelBuilder::empty() const {
-    return model_.modules.empty() && model_.facets.empty() && model_.attachmentInfos.empty();
+bool ProjectModelBuilder::Empty() const {
+    return model_.modules.empty() && model_.facets.empty() && model_.attachment_infos.empty();
 }
 
-void ProjectModelBuilder::addModule(ProjectModule module) {
+void ProjectModelBuilder::AddModule(ProjectModule module) {
     model_.modules.push_back(std::move(module));
 }
 
-void ProjectModelBuilder::addFacet(ProjectFacet facet) {
+void ProjectModelBuilder::AddFacet(ProjectFacet facet) {
     if (facet.id.empty() && !facet.type.empty()) {
         facet.id = facet.type;
     }
     model_.facets.push_back(std::move(facet));
 }
 
-void ProjectModelBuilder::addFacetToPrimaryModule(ProjectFacet facet) {
+void ProjectModelBuilder::AddFacetToPrimaryModule(ProjectFacet facet) {
     if (model_.modules.empty()) {
         return;
     }
@@ -77,129 +183,224 @@ void ProjectModelBuilder::addFacetToPrimaryModule(ProjectFacet facet) {
     model_.modules.front().facets.push_back(std::move(facet));
 }
 
-const ProjectModel& ProjectModelBuilder::preview() const {
+const ProjectModel& ProjectModelBuilder::Preview() const {
     return model_;
 }
 
-ProjectModel ProjectModelBuilder::build() {
+ProjectModel ProjectModelBuilder::Build() {
     return std::move(model_);
 }
 
-void ProjectManager::addProvider(std::unique_ptr<ProjectModelProvider> provider) {
-    if (provider == nullptr || provider->id().empty()) {
-        return;
+ProjectManager::ProjectManager() {
+    RegisterViewProvider(std::make_unique<FilesProjectViewProvider>());
+}
+
+RegistrationHandle ProjectManager::RegisterModelProvider(std::unique_ptr<ProjectModelProvider> provider) {
+    if (provider == nullptr || provider->Id().empty()) {
+        return {};
     }
-    providers_[provider->id()] = std::move(provider);
+    const std::string id = provider->Id();
+    model_providers_[id] = std::move(provider);
+    return RegistrationHandle([this, id] {
+        RemoveModelProvider(id);
+    });
 }
 
-void ProjectManager::removeProvider(const std::string& providerId) {
-    providers_.erase(providerId);
+void ProjectManager::RemoveModelProvider(const std::string& provider_id) {
+    model_providers_.erase(provider_id);
 }
 
-std::vector<std::string> ProjectManager::providerIds() const {
+std::vector<std::string> ProjectManager::ModelProviderIds() const {
     std::vector<std::string> ids;
-    for (const auto& [id, provider] : providers_) {
+    for (const auto& [id, provider] : model_providers_) {
         (void)provider;
         ids.push_back(id);
     }
     return ids;
 }
 
-void ProjectManager::setSingleFile(VirtualFile file, std::string languageId) {
-    if (!file.valid()) {
-        clearSingleFile();
+RegistrationHandle ProjectManager::RegisterViewProvider(std::unique_ptr<ProjectViewProvider> provider) {
+    if (provider == nullptr || provider->Id().empty()) {
+        return {};
+    }
+    const std::string id = provider->Id();
+    view_providers_[id] = std::move(provider);
+    InvalidateViews({.provider_id = id});
+    return RegistrationHandle([this, id] {
+        RemoveViewProvider(id);
+    });
+}
+
+void ProjectManager::RemoveViewProvider(const std::string& provider_id) {
+    const bool removed = view_providers_.erase(provider_id) > 0;
+    if (removed) {
+        InvalidateViews({.provider_id = provider_id});
+    }
+}
+
+std::vector<std::string> ProjectManager::ViewProviderIds() const {
+    std::vector<std::string> ids;
+    for (const auto& [id, provider] : view_providers_) {
+        (void)provider;
+        ids.push_back(id);
+    }
+    return ids;
+}
+
+void ProjectManager::SetSingleFile(VirtualFile file, std::string language_id) {
+    if (!file.Valid()) {
+        ClearSingleFile();
         return;
     }
-    std::filesystem::path workingDirectory;
-    if (const auto localPath = file.localPath()) {
-        workingDirectory = localPath->parent_path();
+    std::filesystem::path working_directory;
+    if (const auto local_path = file.LocalPath()) {
+        working_directory = local_path->parent_path();
     }
-    singleFile_ = SingleFileModel{
+    single_file_ = SingleFileModel{
         .file = std::move(file),
-        .languageId = std::move(languageId),
-        .workingDirectory = std::move(workingDirectory),
-        .metadata = Json::object(),
+        .language_id = std::move(language_id),
+        .working_directory = std::move(working_directory),
     };
 }
 
-void ProjectManager::clearSingleFile() {
-    singleFile_.reset();
+void ProjectManager::ClearSingleFile() {
+    single_file_.reset();
 }
 
-const ProjectModel& ProjectManager::refresh(WorkspaceContext& context) {
-    Workspace& workspace = context.workspace();
+const ProjectModel& ProjectManager::Refresh(WorkspaceContext& context) {
+    Workspace& workspace = context.CurrentWorkspace();
     ProjectModelBuilder builder(
-        singleFile_ ? ProjectOrigin::SingleFile : ProjectOrigin::Workspace,
-        workspace.rootFile());
-    if (singleFile_) {
-        if (singleFile_->languageId.empty()) {
-            singleFile_->languageId = context.languages().languageIdForFile(singleFile_->file);
+        single_file_ ? ProjectOrigin::kSingleFile : ProjectOrigin::kWorkspace,
+        workspace.RootFile());
+    if (single_file_) {
+        if (single_file_->language_id.empty()) {
+            single_file_->language_id = context.Languages().LanguageIdForFile(single_file_->file);
         }
         ProjectFacet facet{
-            .id = singleFile_->languageId,
-            .type = singleFile_->languageId,
-            .title = singleFile_->languageId,
-            .metadata = Json::object(),
+            .id = single_file_->language_id,
+            .type = single_file_->language_id,
+            .title = single_file_->language_id,
         };
-        builder.addFacet(facet);
-        builder.addModule({
+        builder.AddFacet(facet);
+        builder.AddModule({
             .id = "single-file",
-            .name = singleFile_->file.displayName(),
-            .contentRoot = workspace.rootFile(),
-            .sourceRoots = {singleFile_->file},
-            .excludedRoots = {},
+            .name = single_file_->file.DisplayName(),
+            .content_root = workspace.RootFile(),
+            .source_roots = {single_file_->file},
+            .excluded_roots = {},
             .facets = {std::move(facet)},
         });
-        builder.setAttachment({
-            .id = SingleFileModel::attachmentId,
-            .kind = SingleFileModel::attachmentKind,
+        builder.SetAttachment({
+            .id = SingleFileModel::kAttachmentId,
+            .kind = SingleFileModel::kAttachmentKind,
             .title = "Single File",
-            .summary = attachmentSummary(*singleFile_),
-        }, *singleFile_);
+            .summary = AttachmentSummary(*single_file_),
+            .projection = AttachmentProjection(*single_file_),
+        }, *single_file_);
     } else {
-        builder.addModule({
+        builder.AddModule({
             .id = "workspace",
-            .name = workspace.info().name,
-            .contentRoot = workspace.rootFile(),
-            .sourceRoots = {workspace.rootFile()},
-            .excludedRoots = {},
+            .name = workspace.Info().name,
+            .content_root = workspace.RootFile(),
+            .source_roots = {workspace.RootFile()},
+            .excluded_roots = {},
             .facets = {},
         });
     }
 
-    if (!singleFile_) {
-        for (const auto& [id, provider] : providers_) {
+    if (!single_file_) {
+        for (const auto& [id, provider] : model_providers_) {
             (void)id;
-            provider->contribute(context, builder);
+            provider->Contribute(context, builder);
         }
     }
 
-    model_ = builder.build();
+    model_ = builder.Build();
     return model_;
 }
 
-const ProjectModel& ProjectManager::current() const {
+const ProjectModel& ProjectManager::Current() const {
     return model_;
 }
 
-bool ProjectManager::hasProject() const {
-    return !model_.facets.empty() || !model_.attachmentInfos.empty();
+bool ProjectManager::HasProject() const {
+    return !model_.facets.empty() || !model_.attachment_infos.empty();
 }
 
-std::string toString(ProjectOrigin origin) {
+std::vector<ProjectView> ProjectManager::Views(WorkspaceContext& context) const {
+    std::vector<ProjectView> result;
+    std::set<std::string> seen;
+    for (const auto& [id, provider] : view_providers_) {
+        (void)id;
+        for (ProjectView view : provider->Views(context)) {
+            if (view.id.empty() || !seen.insert(view.id).second) {
+                continue;
+            }
+            result.push_back(std::move(view));
+        }
+    }
+    std::sort(result.begin(), result.end(), [](const ProjectView& left, const ProjectView& right) {
+        if (left.priority != right.priority) {
+            return left.priority < right.priority;
+        }
+        if (left.title != right.title) {
+            return left.title < right.title;
+        }
+        return left.id < right.id;
+    });
+    return result;
+}
+
+std::vector<ProjectViewNode> ProjectManager::TopLevelNodes(WorkspaceContext& context, const std::string& view_id) {
+    for (const auto& [id, provider] : view_providers_) {
+        (void)id;
+        for (const ProjectView& view : provider->Views(context)) {
+            if (view.id == view_id) {
+                return provider->TopLevelNodes(context, view);
+            }
+        }
+    }
+    return {};
+}
+
+std::vector<ProjectViewNode> ProjectManager::Children(WorkspaceContext& context, const std::string& view_id, const ProjectViewNode& parent) {
+    for (const auto& [id, provider] : view_providers_) {
+        (void)id;
+        for (const ProjectView& view : provider->Views(context)) {
+            if (view.id == view_id) {
+                return provider->Children(context, view, parent);
+            }
+        }
+    }
+    return {};
+}
+
+std::uint64_t ProjectManager::OnDidChangeViews(EventBus<ProjectViewChangeEvent>::Listener listener) {
+    return view_events_.Subscribe(std::move(listener));
+}
+
+void ProjectManager::RemoveViewListener(std::uint64_t listener_id) {
+    view_events_.Unsubscribe(listener_id);
+}
+
+void ProjectManager::InvalidateViews(ProjectViewChangeEvent event) {
+    view_events_.Publish(event);
+}
+
+std::string ToString(ProjectOrigin origin) {
     switch (origin) {
-    case ProjectOrigin::Workspace:
+    case ProjectOrigin::kWorkspace:
         return "workspace";
-    case ProjectOrigin::SingleFile:
+    case ProjectOrigin::kSingleFile:
         return "singleFile";
-    case ProjectOrigin::Scratch:
+    case ProjectOrigin::kScratch:
         return "scratch";
     }
     return "workspace";
 }
 
-std::string primaryProjectType(const ProjectModel& model) {
-    if (model.origin == ProjectOrigin::SingleFile) {
+std::string PrimaryProjectType(const ProjectModel& model) {
+    if (model.origin == ProjectOrigin::kSingleFile) {
         return "singleFile";
     }
     if (!model.facets.empty()) {
@@ -209,15 +410,6 @@ std::string primaryProjectType(const ProjectModel& model) {
         return "generic";
     }
     return "unknown";
-}
-
-Json toJson(const SingleFileModel& model) {
-    return Json::object({
-        {"file", Json(model.file.toUri().string())},
-        {"languageId", Json(model.languageId)},
-        {"workingDirectory", Json(model.workingDirectory.string())},
-        {"metadata", model.metadata},
-    });
 }
 
 }

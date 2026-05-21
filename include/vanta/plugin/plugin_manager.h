@@ -8,10 +8,10 @@
 #include <string>
 #include <vector>
 
-#include "vanta/plugin/contribution_registry.h"
+#include "vanta/core/registration.h"
+#include "vanta/language/language_service.h"
 #include "vanta/plugin/core_plugin.h"
 #include "vanta/plugin/extension_context.h"
-#include "vanta/plugin/approval_service.h"
 
 namespace vanta {
 
@@ -23,17 +23,20 @@ struct PluginProcessHostDeleter {
 
 struct PluginManifest {
     ExtensionInfo extension;
-    std::string runtimeKind;
+    std::string runtime_kind;
     std::string entry;
+    std::string min_api_version;
+    std::string target_api_version;
+    std::vector<std::string> capabilities;
     std::vector<std::string> permissions;
-    std::vector<std::string> activationEvents;
+    std::vector<std::string> activation_events;
 };
 
 class ConsoleLogger final : public Logger {
 public:
-    void info(const std::string& message) override;
-    void warn(const std::string& message) override;
-    void error(const std::string& message) override;
+    void Info(const std::string& message) override;
+    void Warn(const std::string& message) override;
+    void Error(const std::string& message) override;
 };
 
 enum class PluginLifecycleState {
@@ -49,108 +52,119 @@ struct PluginLifecycleInfo {
     std::string id;
     PluginLifecycleState state = PluginLifecycleState::Discovered;
     bool unloadable = false;
-    std::string runtimeKind;
+    std::string runtime_kind;
     std::string error;
-    std::size_t registrationCount = 0;
+    std::size_t registration_count = 0;
+    bool process_running = false;
+    bool process_responsive = true;
+    int failed_requests = 0;
+    int crash_count = 0;
+    std::optional<int> process_exit_code;
+    std::string process_error;
 };
 
 struct PluginActivationState {
     std::vector<RegistrationHandle> registrations;
+    std::vector<std::unique_ptr<LanguageService>> language_services;
 
-    void track(RegistrationHandle registration);
-    void clear();
-    std::size_t registrationCount() const;
+    void Track(RegistrationHandle registration);
+    void Clear();
+    std::size_t RegistrationCount() const;
 };
 
 class BasicExtensionContext final : public ExtensionContext {
 public:
     BasicExtensionContext(
         ExtensionInfo extension,
-        std::shared_ptr<PluginActivationState> activationState,
+        std::shared_ptr<PluginActivationState> activation_state,
         PermissionSet permissions,
-        ApprovalService& approvals,
         Logger& logger,
         WorkspaceContext& workspace);
 
-    const ExtensionInfo& extension() const override;
-    const WorkspaceInfo& workspace() const override;
-    Logger& logger() override;
-    WorkspaceContext& workspaceContext() override;
-    const PermissionSet& permissions() const override;
+    const ExtensionInfo& Extension() const override;
+    const WorkspaceInfo& Workspace() const override;
+    Logger& Log() override;
+    WorkspaceContext& Context() override;
+    Localizer LocalizerValue() const override;
+    const PermissionSet& Permissions() const override;
+    void Track(RegistrationHandle registration) override;
+    void ContributeComponent(ComponentContribution contribution) override;
 
 private:
     ExtensionInfo extension_;
-    std::shared_ptr<PluginActivationState> activationState_;
+    std::shared_ptr<PluginActivationState> activation_state_;
     PermissionSet permissions_;
-    ApprovalService& approvals_;
     Logger& logger_;
-    std::unique_ptr<WorkspaceContext> workspaceContext_;
+    WorkspaceContext& workspace_;
 };
 
 class PluginManager {
 public:
     ~PluginManager();
 
-    std::vector<PluginManifest> scan(const std::filesystem::path& pluginsRoot);
-    std::optional<PluginManifest> loadManifest(const std::filesystem::path& manifestPath) const;
-    std::vector<std::string> activateCorePlugins(
+    std::vector<PluginManifest> Scan(const std::filesystem::path& plugins_root);
+    std::optional<PluginManifest> LoadManifest(const std::filesystem::path& manifest_path) const;
+    std::vector<std::string> ActivateCorePlugins(
         const CorePluginRegistry& registry,
         Logger& logger,
-        WorkspaceContext& workspace,
-        ApprovalService& approvals);
-    std::vector<std::string> reloadCorePlugins(
+        WorkspaceContext& workspace);
+    std::vector<std::string> ReloadCorePlugins(
         const CorePluginRegistry& registry,
         Logger& logger,
-        WorkspaceContext& workspace,
-        ApprovalService& approvals);
-    std::vector<std::string> activateExternalPlugins(
+        WorkspaceContext& workspace);
+    std::vector<std::string> ActivateExternalPlugins(
         Logger& logger,
-        WorkspaceContext& workspace,
-        ApprovalService& approvals);
-    bool unloadPlugin(const std::string& pluginId, std::string* message = nullptr);
-    std::vector<std::string> reloadPlugin(
-        const std::string& pluginId,
+        WorkspaceContext& workspace);
+    bool UnloadPlugin(const std::string& plugin_id, std::string* message = nullptr);
+    std::vector<std::string> ReloadPlugin(
+        const std::string& plugin_id,
         Logger& logger,
-        WorkspaceContext& workspace,
-        ApprovalService& approvals);
-    void deactivateAll();
-    const std::vector<PluginManifest>& manifests() const;
-    const ContributionRegistry& contributions() const;
-    std::vector<std::string> activePluginIds() const;
-    std::vector<PluginLifecycleInfo> pluginLifecycle() const;
+        WorkspaceContext& workspace);
+    void DeactivateAll();
+    const std::vector<PluginManifest>& Manifests() const;
+    std::vector<std::string> ActivePluginIds() const;
+    void ReconcileProcessHealth();
+    std::vector<PluginLifecycleInfo> PluginLifecycle();
 
 private:
     struct ActivePluginSession {
         PluginManifest manifest;
-        std::shared_ptr<PluginActivationState> activationState;
+        std::shared_ptr<PluginActivationState> activation_state;
         std::unique_ptr<CoreExtension> extension;
-        std::unique_ptr<PluginProcessHost, PluginProcessHostDeleter> processHost;
+        std::unique_ptr<PluginProcessHost, PluginProcessHostDeleter> process_host;
         std::unique_ptr<ExtensionContext> context;
         bool unloadable = false;
         PluginLifecycleState state = PluginLifecycleState::Active;
-        std::string lastError;
+        std::string last_error;
     };
 
-    std::string activateExternalPlugin(
+    std::string ActivateExternalPlugin(
         const PluginManifest& manifest,
         Logger& logger,
+        WorkspaceContext& workspace);
+    const PluginManifest* ManifestById(const std::string& plugin_id) const;
+    bool IsActive(const std::string& plugin_id) const;
+    bool ShouldActivate(const PluginManifest& manifest, WorkspaceContext& workspace) const;
+    std::string CompatibilityError(const PluginManifest& manifest) const;
+    void RegisterExternalPluginCapabilities(
+        const PluginManifest& manifest,
+        PluginProcessHost& host,
+        PluginActivationState& activation_state,
         WorkspaceContext& workspace,
-        ApprovalService& approvals);
-    const PluginManifest* manifestById(const std::string& pluginId) const;
-    void updateLifecycle(
+        const Value& result);
+    void UpdateLifecycle(
         const PluginManifest& manifest,
         PluginLifecycleState state,
         bool unloadable,
         std::string error = {},
-        std::size_t registrationCount = 0);
+        std::size_t registration_count = 0);
 
     std::vector<PluginManifest> manifests_;
-    std::vector<ActivePluginSession> activeSessions_;
-    ContributionRegistry contributions_;
-    std::filesystem::path pluginsRoot_;
+    std::vector<ActivePluginSession> active_sessions_;
+    std::filesystem::path plugins_root_;
     std::map<std::string, PluginLifecycleInfo> lifecycle_;
 };
 
-std::string toString(PluginLifecycleState state);
+std::string ToString(PluginLifecycleState state);
 
 }

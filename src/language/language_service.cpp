@@ -1,4 +1,4 @@
-#include "vanta/language/language_service.h"
+#include "language/language_registry_impl.h"
 
 #include <algorithm>
 #include <utility>
@@ -8,79 +8,79 @@
 namespace vanta {
 namespace {
 
-bool containsString(const std::vector<std::string>& values, const std::string& value) {
+bool ContainsString(const std::vector<std::string>& values, const std::string& value) {
     return std::find(values.begin(), values.end(), value) != values.end();
 }
 
-bool extensionMatches(const std::string& registeredExtension, const std::string& fileExtension) {
-    if (registeredExtension == fileExtension) {
+bool ExtensionMatches(const std::string& registered_extension, const std::string& file_extension) {
+    if (registered_extension == file_extension) {
         return true;
     }
-    if (!registeredExtension.empty() && registeredExtension.front() != '.') {
-        return "." + registeredExtension == fileExtension;
+    if (!registered_extension.empty() && registered_extension.front() != '.') {
+        return "." + registered_extension == file_extension;
     }
     return false;
 }
 
-bool globMatches(const std::string& pattern, const std::string& value) {
-    std::size_t patternIndex = 0;
-    std::size_t valueIndex = 0;
-    std::size_t starIndex = std::string::npos;
-    std::size_t matchedIndex = 0;
+bool GlobMatches(const std::string& pattern, const std::string& value) {
+    std::size_t pattern_index = 0;
+    std::size_t value_index = 0;
+    std::size_t star_index = std::string::npos;
+    std::size_t matched_index = 0;
 
-    while (valueIndex < value.size()) {
-        if (patternIndex < pattern.size() && (pattern[patternIndex] == '?' || pattern[patternIndex] == value[valueIndex])) {
-            ++patternIndex;
-            ++valueIndex;
+    while (value_index < value.size()) {
+        if (pattern_index < pattern.size() && (pattern[pattern_index] == '?' || pattern[pattern_index] == value[value_index])) {
+            ++pattern_index;
+            ++value_index;
             continue;
         }
-        if (patternIndex < pattern.size() && pattern[patternIndex] == '*') {
-            starIndex = patternIndex++;
-            matchedIndex = valueIndex;
+        if (pattern_index < pattern.size() && pattern[pattern_index] == '*') {
+            star_index = pattern_index++;
+            matched_index = value_index;
             continue;
         }
-        if (starIndex != std::string::npos) {
-            patternIndex = starIndex + 1;
-            valueIndex = ++matchedIndex;
+        if (star_index != std::string::npos) {
+            pattern_index = star_index + 1;
+            value_index = ++matched_index;
             continue;
         }
         return false;
     }
 
-    while (patternIndex < pattern.size() && pattern[patternIndex] == '*') {
-        ++patternIndex;
+    while (pattern_index < pattern.size() && pattern[pattern_index] == '*') {
+        ++pattern_index;
     }
-    return patternIndex == pattern.size();
+    return pattern_index == pattern.size();
 }
 
-int matchScore(const LanguageAssociation& association, const VirtualFile& file) {
-    const std::string filename = file.displayName();
-    const std::string extension = file.extension();
-    const std::string uri = file.toUri().string();
+int MatchScore(const LanguageAssociation& association, const VirtualFile& file) {
+    const std::string filename = file.DisplayName();
+    const std::string extension = file.Extension();
+    const std::string uri = file.ToUri().ToString();
 
-    if (containsString(association.filenames, filename)) {
+    if (ContainsString(association.filenames, filename)) {
         return 300;
     }
-    for (const std::string& pattern : association.globPatterns) {
-        if (globMatches(pattern, filename) || globMatches(pattern, uri)) {
+    for (const std::string& pattern : association.glob_patterns) {
+        if (GlobMatches(pattern, filename) || GlobMatches(pattern, uri)) {
             return 200;
         }
     }
-    for (const std::string& registeredExtension : association.extensions) {
-        if (!extension.empty() && extensionMatches(registeredExtension, extension)) {
+    for (const std::string& registered_extension : association.extensions) {
+        if (!extension.empty() && ExtensionMatches(registered_extension, extension)) {
             return 100;
         }
     }
     return -1;
 }
 
-bool selectorMatches(const LanguageSelector& selector, const LanguageResolutionContext& context) {
-    if (!selector.projectFacets.empty()) {
+bool SelectorMatches(const LanguageSelector& selector, const LanguageResolutionContext& context) {
+    if (!selector.project_facets.empty()) {
         if (context.project == nullptr) {
             return false;
         }
-        for (const std::string& facet : selector.projectFacets) {
-            if (!context.project->hasFacet(facet)) {
+        for (const std::string& facet : selector.project_facets) {
+            if (!context.project->HasFacet(facet)) {
                 return false;
             }
         }
@@ -89,28 +89,28 @@ bool selectorMatches(const LanguageSelector& selector, const LanguageResolutionC
         if (context.capability.empty()) {
             return false;
         }
-        if (!containsString(selector.capabilities, context.capability)) {
+        if (!ContainsString(selector.capabilities, context.capability)) {
             return false;
         }
     }
     return true;
 }
 
-int selectorScore(const LanguageSelector& selector) {
-    return static_cast<int>(selector.projectFacets.size() * 40 + selector.capabilities.size() * 20);
+int SelectorScore(const LanguageSelector& selector) {
+    return static_cast<int>(selector.project_facets.size() * 40 + selector.capabilities.size() * 20);
 }
 
-bool betterLanguageMatch(int score, int priority, std::uint64_t order, int bestScore, int bestPriority, std::uint64_t bestOrder) {
-    if (score != bestScore) {
-        return score > bestScore;
+bool BetterLanguageMatch(int score, int priority, std::uint64_t order, int best_score, int best_priority, std::uint64_t best_order) {
+    if (score != best_score) {
+        return score > best_score;
     }
-    if (priority != bestPriority) {
-        return priority > bestPriority;
+    if (priority != best_priority) {
+        return priority > best_priority;
     }
-    return order > bestOrder;
+    return order > best_order;
 }
 
-std::vector<BracketPair> commonBrackets() {
+std::vector<BracketPair> CommonBrackets() {
     return {
         {.open = "{", .close = "}"},
         {.open = "[", .close = "]"},
@@ -118,7 +118,7 @@ std::vector<BracketPair> commonBrackets() {
     };
 }
 
-std::vector<BracketPair> commonSurroundingPairs() {
+std::vector<BracketPair> CommonSurroundingPairs() {
     return {
         {.open = "{", .close = "}"},
         {.open = "[", .close = "]"},
@@ -128,60 +128,56 @@ std::vector<BracketPair> commonSurroundingPairs() {
     };
 }
 
-LanguageConfiguration cStyleConfiguration() {
+LanguageConfiguration CStyleConfiguration() {
     return {
-        .lineComment = "//",
-        .blockComment = {"/*", "*/"},
-        .brackets = commonBrackets(),
-        .autoClosingPairs = commonSurroundingPairs(),
-        .surroundingPairs = commonSurroundingPairs(),
+        .line_comment = "//",
+        .block_comment = {"/*", "*/"},
+        .brackets = CommonBrackets(),
+        .auto_closing_pairs = CommonSurroundingPairs(),
+        .surrounding_pairs = CommonSurroundingPairs(),
     };
 }
 
-LanguageConfiguration pythonConfiguration() {
+LanguageConfiguration PythonConfiguration() {
     return {
-        .lineComment = "#",
-        .brackets = commonBrackets(),
-        .autoClosingPairs = commonSurroundingPairs(),
-        .surroundingPairs = commonSurroundingPairs(),
+        .line_comment = "#",
+        .brackets = CommonBrackets(),
+        .auto_closing_pairs = CommonSurroundingPairs(),
+        .surrounding_pairs = CommonSurroundingPairs(),
     };
 }
 
 }
 
-void LanguageService::didOpen(const TextDocument& document) {
+void LanguageService::DidOpen(const TextDocument& document) {
     (void)document;
 }
 
-void LanguageService::didChange(const TextDocument& document) {
+void LanguageService::DidChange(const TextDocument& document) {
     (void)document;
 }
 
-void LanguageService::didSave(const TextDocument& document) {
+void LanguageService::DidSave(const TextDocument& document) {
     (void)document;
 }
 
-void LanguageService::didClose(const VirtualFile& file) {
+void LanguageService::DidClose(const VirtualFile& file) {
     (void)file;
 }
 
-DefaultLanguageRegistry::DefaultLanguageRegistry() = default;
+internal::LanguageRegistryImpl::LanguageRegistryImpl() = default;
 
-void DefaultLanguageRegistry::addLanguage(Language language) {
-    addRegistration(std::move(language));
-}
-
-RegistrationHandle DefaultLanguageRegistry::registerLanguage(Language language) {
-    const std::uint64_t registrationId = addRegistration(std::move(language));
-    if (registrationId == 0) {
+RegistrationHandle internal::LanguageRegistryImpl::RegisterLanguage(Language language) {
+    const std::uint64_t registration_id = AddRegistration(std::move(language));
+    if (registration_id == 0) {
         return {};
     }
-    return RegistrationHandle([this, registrationId] {
-        removeRegistration(registrationId);
+    return RegistrationHandle([this, registration_id] {
+        RemoveRegistration(registration_id);
     });
 }
 
-std::vector<Language> DefaultLanguageRegistry::languages() const {
+std::vector<Language> internal::LanguageRegistryImpl::Languages() const {
     std::vector<Language> result;
     for (const RegisteredLanguage& registered : languages_) {
         result.push_back(registered.language);
@@ -189,130 +185,130 @@ std::vector<Language> DefaultLanguageRegistry::languages() const {
     return result;
 }
 
-const Language* DefaultLanguageRegistry::languageForFile(const VirtualFile& file) const {
-    return languageForFile(file, {});
+const Language* internal::LanguageRegistryImpl::LanguageForFile(const VirtualFile& file) const {
+    return LanguageForFile(file, {});
 }
 
-const Language* DefaultLanguageRegistry::languageForFile(const VirtualFile& file, const LanguageResolutionContext& context) const {
+const Language* internal::LanguageRegistryImpl::LanguageForFile(const VirtualFile& file, const LanguageResolutionContext& context) const {
     const RegisteredLanguage* best = nullptr;
-    int bestScore = -1;
-    int bestPriority = 0;
-    std::uint64_t bestOrder = 0;
+    int best_score = -1;
+    int best_priority = 0;
+    std::uint64_t best_order = 0;
 
     for (const RegisteredLanguage& registered : languages_) {
-        if (!selectorMatches(registered.language.selector, context)) {
+        if (!SelectorMatches(registered.language.selector, context)) {
             continue;
         }
-        const int score = matchScore(registered.language.association, file);
+        const int score = MatchScore(registered.language.association, file);
         if (score < 0) {
             continue;
         }
-        const int totalScore = score + selectorScore(registered.language.selector);
-        if (best == nullptr || betterLanguageMatch(totalScore, registered.language.priority, registered.order, bestScore, bestPriority, bestOrder)) {
+        const int total_score = score + SelectorScore(registered.language.selector);
+        if (best == nullptr || BetterLanguageMatch(total_score, registered.language.priority, registered.order, best_score, best_priority, best_order)) {
             best = &registered;
-            bestScore = totalScore;
-            bestPriority = registered.language.priority;
-            bestOrder = registered.order;
+            best_score = total_score;
+            best_priority = registered.language.priority;
+            best_order = registered.order;
         }
     }
     return best == nullptr ? nullptr : &best->language;
 }
 
-const Language* DefaultLanguageRegistry::languageForId(const std::string& languageId) const {
-    return languageForId(languageId, {});
+const Language* internal::LanguageRegistryImpl::LanguageForId(const std::string& language_id) const {
+    return LanguageForId(language_id, {});
 }
 
-const Language* DefaultLanguageRegistry::languageForId(const std::string& languageId, const LanguageResolutionContext& context) const {
+const Language* internal::LanguageRegistryImpl::LanguageForId(const std::string& language_id, const LanguageResolutionContext& context) const {
     const RegisteredLanguage* best = nullptr;
-    int bestPriority = 0;
-    int bestSelectorScore = -1;
-    std::uint64_t bestOrder = 0;
+    int best_priority = 0;
+    int best_selector_score = -1;
+    std::uint64_t best_order = 0;
 
     for (const RegisteredLanguage& registered : languages_) {
-        if (registered.language.id != languageId) {
+        if (registered.language.id != language_id) {
             continue;
         }
-        if (!selectorMatches(registered.language.selector, context)) {
+        if (!SelectorMatches(registered.language.selector, context)) {
             continue;
         }
-        const int currentSelectorScore = selectorScore(registered.language.selector);
+        const int current_selector_score = SelectorScore(registered.language.selector);
         if (best == nullptr ||
-            registered.language.priority > bestPriority ||
-            (registered.language.priority == bestPriority && currentSelectorScore > bestSelectorScore) ||
-            (registered.language.priority == bestPriority && currentSelectorScore == bestSelectorScore && registered.order > bestOrder)) {
+            registered.language.priority > best_priority ||
+            (registered.language.priority == best_priority && current_selector_score > best_selector_score) ||
+            (registered.language.priority == best_priority && current_selector_score == best_selector_score && registered.order > best_order)) {
             best = &registered;
-            bestPriority = registered.language.priority;
-            bestSelectorScore = currentSelectorScore;
-            bestOrder = registered.order;
+            best_priority = registered.language.priority;
+            best_selector_score = current_selector_score;
+            best_order = registered.order;
         }
     }
     return best == nullptr ? nullptr : &best->language;
 }
 
-LanguageService* DefaultLanguageRegistry::serviceForLanguage(const std::string& languageId) const {
-    return serviceForLanguage(languageId, {});
+LanguageService* internal::LanguageRegistryImpl::ServiceForLanguage(const std::string& language_id) const {
+    return ServiceForLanguage(language_id, {});
 }
 
-LanguageService* DefaultLanguageRegistry::serviceForLanguage(const std::string& languageId, const LanguageResolutionContext& context) const {
-    const Language* language = languageForId(languageId, context);
+LanguageService* internal::LanguageRegistryImpl::ServiceForLanguage(const std::string& language_id, const LanguageResolutionContext& context) const {
+    const Language* language = LanguageForId(language_id, context);
     return language == nullptr ? nullptr : language->service;
 }
 
-LanguageService* DefaultLanguageRegistry::serviceForDocument(const VirtualFile& file) const {
-    return serviceForDocument(file, {});
+LanguageService* internal::LanguageRegistryImpl::ServiceForDocument(const VirtualFile& file) const {
+    return ServiceForDocument(file, {});
 }
 
-LanguageService* DefaultLanguageRegistry::serviceForDocument(const VirtualFile& file, const LanguageResolutionContext& context) const {
-    const Language* language = languageForFile(file, context);
+LanguageService* internal::LanguageRegistryImpl::ServiceForDocument(const VirtualFile& file, const LanguageResolutionContext& context) const {
+    const Language* language = LanguageForFile(file, context);
     return language == nullptr ? nullptr : language->service;
 }
 
-std::string DefaultLanguageRegistry::languageIdForFile(const VirtualFile& file) const {
-    return languageIdForFile(file, {});
+std::string internal::LanguageRegistryImpl::LanguageIdForFile(const VirtualFile& file) const {
+    return LanguageIdForFile(file, {});
 }
 
-std::string DefaultLanguageRegistry::languageIdForFile(const VirtualFile& file, const LanguageResolutionContext& context) const {
-    const Language* language = languageForFile(file, context);
+std::string internal::LanguageRegistryImpl::LanguageIdForFile(const VirtualFile& file, const LanguageResolutionContext& context) const {
+    const Language* language = LanguageForFile(file, context);
     return language == nullptr ? "" : language->id;
 }
 
-std::vector<std::string> DefaultLanguageRegistry::languageIds() const {
+std::vector<std::string> internal::LanguageRegistryImpl::LanguageIds() const {
     std::vector<std::string> result;
     for (const RegisteredLanguage& registered : languages_) {
-        if (!registered.language.id.empty() && !containsString(result, registered.language.id)) {
+        if (!registered.language.id.empty() && !ContainsString(result, registered.language.id)) {
             result.push_back(registered.language.id);
         }
     }
     return result;
 }
 
-std::uint64_t DefaultLanguageRegistry::addRegistration(Language language) {
+std::uint64_t internal::LanguageRegistryImpl::AddRegistration(Language language) {
     if (language.id.empty()) {
         return 0;
     }
-    const std::uint64_t registrationId = nextRegistrationId_++;
+    const std::uint64_t registration_id = next_registration_id_++;
     languages_.push_back({
-        .registrationId = registrationId,
+        .registration_id = registration_id,
         .language = std::move(language),
-        .order = nextOrder_++,
+        .order = next_order_++,
     });
-    return registrationId;
+    return registration_id;
 }
 
-void DefaultLanguageRegistry::removeRegistration(std::uint64_t registrationId) {
-    auto it = std::remove_if(languages_.begin(), languages_.end(), [registrationId](const RegisteredLanguage& language) {
-        return language.registrationId == registrationId;
+void internal::LanguageRegistryImpl::RemoveRegistration(std::uint64_t registration_id) {
+    auto it = std::remove_if(languages_.begin(), languages_.end(), [registration_id](const RegisteredLanguage& language) {
+        return language.registration_id == registration_id;
     });
     languages_.erase(it, languages_.end());
 }
 
 namespace {
 
-Language language(std::string id, std::string displayName, std::vector<std::string> extensions, LanguageConfiguration configuration) {
+Language MakeLanguage(std::string id, std::string display_name, std::vector<std::string> extensions, LanguageConfiguration configuration) {
     return {
         .id = std::move(id),
         .definition = {
-            .displayName = std::move(displayName),
+            .display_name = std::move(display_name),
         },
         .association = {
             .extensions = std::move(extensions),
@@ -323,127 +319,25 @@ Language language(std::string id, std::string displayName, std::vector<std::stri
 
 }
 
-namespace {
-
-Json traceToJson(const LanguageRequestTrace& trace) {
-    return Json::object({
-        {"id", Json(static_cast<std::int64_t>(trace.id))},
-        {"method", Json(trace.method)},
-        {"rawRequest", Json(trace.rawRequest)},
-        {"rawResponse", Json(trace.rawResponse)},
-    });
-}
-
-Json completionItemsToJson(const std::vector<CompletionItem>& items) {
-    Json::Array values;
-    for (const CompletionItem& item : items) {
-        values.push_back(Json::object({
-            {"label", Json(item.label)},
-            {"insertText", Json(item.insertText)},
-            {"detail", Json(item.detail)},
-            {"documentation", Json(item.documentation)},
-        }));
-    }
-    return Json::array(std::move(values));
-}
-
-Json locationsToJson(const std::vector<Location>& locations) {
-    Json::Array values;
-    for (const Location& location : locations) {
-        values.push_back(Json::object({
-            {"file", Json(location.file.toUri().string())},
-            {"range", Json::object({
-                {"start", Json::object({
-                    {"line", Json(static_cast<std::int64_t>(location.range.start.line))},
-                    {"character", Json(static_cast<std::int64_t>(location.range.start.character))},
-                })},
-                {"end", Json::object({
-                    {"line", Json(static_cast<std::int64_t>(location.range.end.line))},
-                    {"character", Json(static_cast<std::int64_t>(location.range.end.character))},
-                })},
-            })},
-        }));
-    }
-    return Json::array(std::move(values));
-}
-
-Json tokenDataToJson(const std::vector<std::int64_t>& data) {
-    Json::Array values;
-    for (std::int64_t value : data) {
-        values.push_back(Json(value));
-    }
-    return Json::array(std::move(values));
-}
-
-}
-
-Json languageResultToJson(const CompletionList& result) {
-    return Json::object({
-        {"ok", Json(result.ok)},
-        {"error", Json(result.error)},
-        {"incomplete", Json(result.incomplete)},
-        {"items", completionItemsToJson(result.items)},
-        {"raw", result.raw},
-        {"trace", traceToJson(result.trace)},
-    });
-}
-
-Json languageResultToJson(const HoverResult& result) {
-    return Json::object({
-        {"ok", Json(result.ok)},
-        {"error", Json(result.error)},
-        {"contents", Json(result.contents)},
-        {"raw", result.raw},
-        {"trace", traceToJson(result.trace)},
-    });
-}
-
-Json languageResultToJson(const LocationResult& result) {
-    return Json::object({
-        {"ok", Json(result.ok)},
-        {"error", Json(result.error)},
-        {"locations", locationsToJson(result.locations)},
-        {"raw", result.raw},
-        {"trace", traceToJson(result.trace)},
-    });
-}
-
-Json languageResultToJson(const SemanticTokens& result) {
-    return Json::object({
-        {"ok", Json(result.ok)},
-        {"error", Json(result.error)},
-        {"data", tokenDataToJson(result.data)},
-        {"raw", result.raw},
-        {"trace", traceToJson(result.trace)},
-    });
-}
-
-Json languageErrorToJson(const std::string& error) {
-    return Json::object({
-        {"ok", Json(false)},
-        {"error", Json(error)},
-    });
-}
-
-std::vector<Language> defaultLanguages() {
+std::vector<Language> DefaultLanguages() {
     std::vector<Language> languages;
-    languages.push_back(language("cpp", "C++", {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}, cStyleConfiguration()));
+    languages.push_back(MakeLanguage("cpp", "C++", {".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"}, CStyleConfiguration()));
     languages.back().definition.aliases = {"c++", "cpp"};
-    languages.push_back(language("python", "Python", {".py", ".pyw"}, pythonConfiguration()));
+    languages.push_back(MakeLanguage("python", "Python", {".py", ".pyw"}, PythonConfiguration()));
     languages.back().definition.aliases = {"py"};
-    languages.push_back(language("java", "Java", {".java"}, cStyleConfiguration()));
-    languages.push_back(language("kotlin", "Kotlin", {".kt", ".kts"}, cStyleConfiguration()));
-    languages.push_back(language("javascript", "JavaScript", {".js", ".mjs", ".cjs"}, cStyleConfiguration()));
+    languages.push_back(MakeLanguage("java", "Java", {".java"}, CStyleConfiguration()));
+    languages.push_back(MakeLanguage("kotlin", "Kotlin", {".kt", ".kts"}, CStyleConfiguration()));
+    languages.push_back(MakeLanguage("javascript", "JavaScript", {".js", ".mjs", ".cjs"}, CStyleConfiguration()));
     languages.back().definition.aliases = {"js"};
-    languages.push_back(language("typescript", "TypeScript", {".ts", ".tsx"}, cStyleConfiguration()));
+    languages.push_back(MakeLanguage("typescript", "TypeScript", {".ts", ".tsx"}, CStyleConfiguration()));
     languages.back().definition.aliases = {"ts"};
-    languages.push_back(language("rust", "Rust", {".rs"}, cStyleConfiguration()));
+    languages.push_back(MakeLanguage("rust", "Rust", {".rs"}, CStyleConfiguration()));
     return languages;
 }
 
-void registerDefaultLanguages(LanguageRegistry& registry) {
-    for (Language language : defaultLanguages()) {
-        registry.addLanguage(std::move(language));
+void RegisterDefaultLanguages(LanguageRegistry& registry) {
+    for (Language language : DefaultLanguages()) {
+        registry.RegisterLanguage(std::move(language));
     }
 }
 

@@ -3,7 +3,7 @@
 #include <string>
 
 #include "vanta/core/diagnostic.h"
-#include "vanta/platform/async.h"
+#include "vanta/core/event.h"
 #include "vanta/execution/job_service.h"
 #include "vanta/vfs/file_watcher.h"
 
@@ -25,6 +25,7 @@ enum class IdeEventKind {
     JobCompleted,
     ChangeSetProposed,
     ChangeSetApplied,
+    ContributionsChanged,
 };
 
 struct IdeEvent {
@@ -32,12 +33,12 @@ struct IdeEvent {
     VirtualFile file;
     std::string source;
     std::string message;
-    JobId jobId = 0;
+    JobId job_id = 0;
 };
 
 using IdeEventBus = EventBus<IdeEvent>;
 
-std::string toString(IdeEventKind kind);
-IdeEventKind ideEventKindFromFileChange(VirtualFileChangeKind kind);
+std::string ToString(IdeEventKind kind);
+IdeEventKind IdeEventKindFromFileChange(VirtualFileChangeKind kind);
 
 }

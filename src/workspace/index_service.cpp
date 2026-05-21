@@ -1,112 +1,283 @@
 #include "vanta/workspace/index_service.h"
 
+#include <algorithm>
+#include <cctype>
 #include <cstdint>
+#include <sstream>
 #include <utility>
 
-#include "vanta/builtin/cpp/cpp_index.h"
-#include "vanta/workspace/search_service.h"
+#include "vanta/core/json_codec.h"
 #include "vanta/workspace/workspace_context.h"
+#include "vanta/workspace/workspace_runtime.h"
 
 namespace vanta {
 namespace {
 
-class SearchIndexProvider final : public IndexProvider {
-public:
-    explicit SearchIndexProvider(SearchService& search) : search_(search) {}
-
-    std::string id() const override {
-        return "vanta.index.search";
-    }
-
-    std::string kind() const override {
-        return "text";
-    }
-
-    IndexSnapshot refresh(WorkspaceContext& context, JobContext& job) override {
-        job.report(0.1, "Refreshing search index");
-        search_.rebuild(context.workspace());
-        return {
-            .id = id(),
-            .kind = kind(),
-            .status = IndexStatus::Ready,
-            .itemCount = search_.entries().size(),
-            .message = "Search index ready",
-            .data = Json::object({
-                {"entries", Json(static_cast<std::int64_t>(search_.entries().size()))},
-            }),
-        };
-    }
-
-private:
-    SearchService& search_;
+struct SearchIndexEntry {
+    VirtualFile file;
+    std::string name;
+    bool directory = false;
 };
 
-class CppSemanticIndexAdapter final : public IndexProvider {
-public:
-    explicit CppSemanticIndexAdapter(CppSemanticIndex& cppIndex) : cppIndex_(cppIndex) {}
-
-    std::string id() const override {
-        return "vanta.index.cpp";
-    }
-
-    std::string kind() const override {
-        return "semantic.cpp";
-    }
-
-    IndexSnapshot refresh(WorkspaceContext&, JobContext& job) override {
-        job.report(0.6, "Refreshing C++ semantic index snapshot");
-        const CppSemanticIndexSnapshot value = cppIndex_.snapshot();
-        const std::size_t translationUnits = value.compilationDatabase.translationUnits.size();
-        return {
-            .id = id(),
-            .kind = kind(),
-            .status = value.ready ? IndexStatus::Ready : IndexStatus::Unknown,
-            .itemCount = translationUnits,
-            .message = value.ready ? "C++ semantic index ready" : "C++ semantic index unavailable",
-            .data = Json::object({
-                {"providerId", Json(value.providerId)},
-                {"translationUnits", Json(static_cast<std::int64_t>(translationUnits))},
-                {"metadata", value.metadata},
-            }),
-        };
-    }
-
-private:
-    CppSemanticIndex& cppIndex_;
-};
-
+bool ShouldSkipDirectory(const VirtualFile& file) {
+    const std::string name = file.DisplayName();
+    return name == ".git" || name == ".vanta" || name == "build" || name == ".cache";
 }
 
-void IndexCoordinator::addProvider(std::unique_ptr<IndexProvider> provider) {
-    if (provider == nullptr || provider->id().empty()) {
-        return;
-    }
-    const std::string id = provider->id();
-    std::lock_guard<std::mutex> lock(mutex_);
-    providers_[id] = std::move(provider);
+bool IsDirectory(const VirtualFile& file) {
+    return file.Valid() && file.Stat().kind == VirtualFileKind::Directory;
 }
 
-RegistrationHandle IndexCoordinator::registerProvider(std::unique_ptr<IndexProvider> provider) {
-    if (provider == nullptr || provider->id().empty()) {
-        return {};
+std::vector<VirtualFile> SortedVisibleChildren(const VirtualFile& directory) {
+    std::vector<VirtualFile> children;
+    for (const VirtualFile& child : directory.ListChildren()) {
+        if (IsDirectory(child) && ShouldSkipDirectory(child)) {
+            continue;
+        }
+        children.push_back(child);
     }
-    const std::string id = provider->id();
-    addProvider(std::move(provider));
-    return RegistrationHandle([this, id] {
-        removeProvider(id);
+    std::sort(children.begin(), children.end(), [](const VirtualFile& left, const VirtualFile& right) {
+        const bool left_directory = IsDirectory(left);
+        const bool right_directory = IsDirectory(right);
+        if (left_directory != right_directory) {
+            return left_directory > right_directory;
+        }
+        return left.DisplayName() < right.DisplayName();
+    });
+    return children;
+}
+
+std::string Lowercase(std::string value) {
+    for (char& ch : value) {
+        ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    }
+    return value;
+}
+
+int FileScore(const SearchIndexEntry& entry, const std::string& query) {
+    if (query.empty()) {
+        return 1;
+    }
+    const std::string name = Lowercase(entry.name);
+    const std::string target = Lowercase(entry.file.ToUri().ToString());
+    const std::string needle = Lowercase(query);
+    if (name == needle) {
+        return 100;
+    }
+    if (name.rfind(needle, 0) == 0) {
+        return 80;
+    }
+    if (name.find(needle) != std::string::npos) {
+        return 60;
+    }
+    if (target.find(needle) != std::string::npos) {
+        return 30;
+    }
+    return 0;
+}
+
+Value IndexSnapshotProjection(const IndexSnapshot& snapshot) {
+    return Value::ObjectValue({
+        {"id", Value(snapshot.id)},
+        {"kind", Value(snapshot.kind)},
+        {"status", Value(ToString(snapshot.status))},
+        {"version", Value(static_cast<std::int64_t>(snapshot.version))},
+        {"itemCount", Value(static_cast<std::int64_t>(snapshot.item_count))},
+        {"message", Value(snapshot.message)},
     });
 }
 
-void IndexCoordinator::removeProvider(const std::string& providerId) {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        providers_.erase(providerId);
-        snapshots_.erase(providerId);
+Value IndexSnapshotsProjection(const std::vector<IndexSnapshot>& snapshots) {
+    Value::Array values;
+    for (const IndexSnapshot& snapshot : snapshots) {
+        values.push_back(IndexSnapshotProjection(snapshot));
     }
-    publish();
+    return Value::ArrayValue(std::move(values));
 }
 
-std::vector<std::string> IndexCoordinator::providerIds() const {
+std::string TrimPreview(const std::string& line) {
+    const std::size_t first = line.find_first_not_of(" \t");
+    if (first == std::string::npos) {
+        return "";
+    }
+    const std::size_t last = line.find_last_not_of(" \t");
+    return line.substr(first, last - first + 1);
+}
+
+class SearchIndexProvider final : public IndexProvider {
+public:
+    std::string Id() const override {
+        return "vanta.index.search";
+    }
+
+    std::string Kind() const override {
+        return "text";
+    }
+
+    IndexSnapshot Refresh(WorkspaceContext& context, JobContext& job) override {
+        job.Report(0.1, "Refreshing search index");
+        entries_.clear();
+        if (context.CurrentWorkspace().IsOpen()) {
+            AddFile(context.CurrentWorkspace().RootFile());
+        }
+        return {
+            .id = Id(),
+            .kind = Kind(),
+            .status = IndexStatus::Ready,
+            .item_count = entries_.size(),
+            .message = "Search index ready",
+        };
+    }
+
+    bool Supports(IndexQueryKind kind) const override {
+        return kind == IndexQueryKind::Files || kind == IndexQueryKind::Text;
+    }
+
+    IndexQueryResult Query(WorkspaceContext&, const IndexQuery& query) const override {
+        if (query.kind == IndexQueryKind::Files) {
+            return SearchFiles(query);
+        }
+        if (query.kind == IndexQueryKind::Text) {
+            return SearchText(query);
+        }
+        return {
+            .ok = false,
+            .error = "Search index does not support query kind: " + ToString(query.kind),
+        };
+    }
+
+private:
+    void AddFile(const VirtualFile& file) {
+        if (!file.Valid() || !file.Exists()) {
+            return;
+        }
+        const bool directory = IsDirectory(file);
+        entries_.push_back({
+            .file = file,
+            .name = file.DisplayName(),
+            .directory = directory,
+        });
+        if (!directory) {
+            return;
+        }
+        for (const VirtualFile& child : SortedVisibleChildren(file)) {
+            AddFile(child);
+        }
+    }
+
+    IndexQueryResult SearchFiles(const IndexQuery& query) const {
+        IndexQueryResult result;
+        result.ok = true;
+        for (const SearchIndexEntry& entry : entries_) {
+            const int score = FileScore(entry, query.query);
+            if (score == 0) {
+                continue;
+            }
+            result.hits.push_back({
+                .file = entry.file,
+                .title = entry.name,
+                .preview = entry.name,
+                .provider_id = Id(),
+                .score = score,
+            });
+        }
+        std::sort(result.hits.begin(), result.hits.end(), [](const IndexHit& left, const IndexHit& right) {
+            if (left.score != right.score) {
+                return left.score > right.score;
+            }
+            return left.file.ToUri().ToString() < right.file.ToUri().ToString();
+        });
+        if (result.hits.size() > query.limit) {
+            result.hits.resize(query.limit);
+        }
+        return result;
+    }
+
+    IndexQueryResult SearchText(const IndexQuery& query) const {
+        IndexQueryResult result;
+        result.ok = true;
+        if (query.query.empty()) {
+            return result;
+        }
+
+        const std::string needle = Lowercase(query.query);
+        for (const SearchIndexEntry& entry : entries_) {
+            if (entry.directory) {
+                continue;
+            }
+            auto text = entry.file.ReadText();
+            if (!text) {
+                continue;
+            }
+
+            std::istringstream stream(*text);
+            std::string line;
+            int line_number = 0;
+            while (std::getline(stream, line)) {
+                const std::string lowered_line = Lowercase(line);
+                const std::size_t found = lowered_line.find(needle);
+                if (found != std::string::npos) {
+                    result.hits.push_back({
+                        .file = entry.file,
+                        .range = {
+                            .start = {.line = line_number, .character = static_cast<int>(found)},
+                            .end = {.line = line_number, .character = static_cast<int>(found + query.query.size())},
+                        },
+                        .title = entry.name,
+                        .preview = TrimPreview(line),
+                        .provider_id = Id(),
+                        .score = 100,
+                    });
+                    if (result.hits.size() >= query.limit) {
+                        return result;
+                    }
+                }
+                ++line_number;
+            }
+        }
+        return result;
+    }
+
+    std::vector<SearchIndexEntry> entries_;
+};
+
+}
+
+bool IndexProvider::Supports(IndexQueryKind) const {
+    return false;
+}
+
+IndexQueryResult IndexProvider::Query(WorkspaceContext&, const IndexQuery& query) const {
+    return {
+        .ok = false,
+        .error = "Index provider does not support query kind: " + ToString(query.kind),
+    };
+}
+
+RegistrationHandle IndexService::RegisterProvider(std::unique_ptr<IndexProvider> provider) {
+    if (provider == nullptr || provider->Id().empty()) {
+        return {};
+    }
+    const std::string id = provider->Id();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        providers_[id] = std::move(provider);
+    }
+    return RegistrationHandle([this, id] {
+        RemoveProvider(id);
+    });
+}
+
+void IndexService::RemoveProvider(const std::string& provider_id) {
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        providers_.erase(provider_id);
+        snapshots_.erase(provider_id);
+    }
+    Publish();
+}
+
+std::vector<std::string> IndexService::ProviderIds() const {
     std::vector<std::string> ids;
     std::lock_guard<std::mutex> lock(mutex_);
     for (const auto& [id, provider] : providers_) {
@@ -116,8 +287,8 @@ std::vector<std::string> IndexCoordinator::providerIds() const {
     return ids;
 }
 
-JobId IndexCoordinator::refresh(WorkspaceContext& context, JobService& jobs, AsyncRuntime& runtime, std::string title) {
-    JobHandle handle = jobs.submit(runtime, {
+JobId IndexService::Refresh(WorkspaceContext& context, std::string title) {
+    JobHandle handle = context.Jobs().Submit(context.Async(), {
         .kind = JobKind::Index,
         .title = title.empty() ? "Refresh indexes" : std::move(title),
     }, [this, &context](JobContext& job) {
@@ -126,17 +297,14 @@ JobId IndexCoordinator::refresh(WorkspaceContext& context, JobService& jobs, Asy
         {
             std::lock_guard<std::mutex> lock(mutex_);
             for (const auto& [id, provider] : providers_) {
-                IndexSnapshot value = provider->refresh(context, job);
+                IndexSnapshot value = provider->Refresh(context, job);
                 if (value.id.empty()) {
                     value.id = id;
                 }
                 if (value.kind.empty()) {
-                    value.kind = provider->kind();
+                    value.kind = provider->Kind();
                 }
-                value.version = nextVersion_++;
-                if (!value.data.isObject()) {
-                    value.data = Json::object();
-                }
+                value.version = next_version_++;
                 if (value.status == IndexStatus::Failed) {
                     ok = false;
                     if (!value.message.empty()) {
@@ -146,19 +314,72 @@ JobId IndexCoordinator::refresh(WorkspaceContext& context, JobService& jobs, Asy
                 snapshots_[value.id] = std::move(value);
             }
         }
-        publish();
+        Publish();
         return JobResult{
             .success = ok,
             .message = std::move(message),
-            .data = Json::object({
-                {"snapshots", toJson(snapshots())},
+            .payload = Value::ObjectValue({
+                {"snapshots", IndexSnapshotsProjection(Snapshots())},
             }),
         };
     });
-    return handle.id();
+    return handle.Id();
 }
 
-std::vector<IndexSnapshot> IndexCoordinator::snapshots() const {
+IndexQueryResult IndexService::Query(WorkspaceContext& context, const IndexQuery& query) const {
+    IndexQueryResult result;
+    result.ok = true;
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (!query.provider_id.empty()) {
+        auto provider = providers_.find(query.provider_id);
+        if (provider == providers_.end()) {
+            return {
+                .ok = false,
+                .error = "Index provider was not found: " + query.provider_id,
+            };
+        }
+        if (!provider->second->Supports(query.kind)) {
+            return provider->second->Query(context, query);
+        }
+        return provider->second->Query(context, query);
+    }
+
+    bool queried = false;
+    for (const auto& [id, provider] : providers_) {
+        (void)id;
+        if (!provider->Supports(query.kind)) {
+            continue;
+        }
+        queried = true;
+        IndexQueryResult provider_result = provider->Query(context, query);
+        if (!provider_result.ok) {
+            result.ok = false;
+            if (!provider_result.error.empty()) {
+                result.error = provider_result.error;
+            }
+            continue;
+        }
+        result.hits.insert(result.hits.end(), provider_result.hits.begin(), provider_result.hits.end());
+    }
+    if (!queried) {
+        return {
+            .ok = false,
+            .error = "No index provider supports query kind: " + ToString(query.kind),
+        };
+    }
+    std::sort(result.hits.begin(), result.hits.end(), [](const IndexHit& left, const IndexHit& right) {
+        if (left.score != right.score) {
+            return left.score > right.score;
+        }
+        return left.file.ToUri().ToString() < right.file.ToUri().ToString();
+    });
+    if (result.hits.size() > query.limit) {
+        result.hits.resize(query.limit);
+    }
+    return result;
+}
+
+std::vector<IndexSnapshot> IndexService::Snapshots() const {
     std::vector<IndexSnapshot> values;
     std::lock_guard<std::mutex> lock(mutex_);
     for (const auto& [id, snapshot] : snapshots_) {
@@ -168,38 +389,37 @@ std::vector<IndexSnapshot> IndexCoordinator::snapshots() const {
     return values;
 }
 
-std::optional<IndexSnapshot> IndexCoordinator::snapshot(const std::string& providerId) const {
+std::optional<IndexSnapshot> IndexService::Snapshot(const std::string& provider_id) const {
     std::lock_guard<std::mutex> lock(mutex_);
-    auto it = snapshots_.find(providerId);
+    auto it = snapshots_.find(provider_id);
     return it == snapshots_.end() ? std::nullopt : std::optional<IndexSnapshot>(it->second);
 }
 
-void IndexCoordinator::clearSnapshots() {
+void IndexService::ClearSnapshots() {
     {
         std::lock_guard<std::mutex> lock(mutex_);
         snapshots_.clear();
     }
-    publish();
+    Publish();
 }
 
-std::uint64_t IndexCoordinator::onDidChangeIndex(EventBus<IndexChangeEvent>::Listener listener) {
-    return onDidChange_.subscribe(std::move(listener));
+std::uint64_t IndexService::OnDidChangeIndex(EventBus<IndexChangeEvent>::Listener listener) {
+    return on_did_change_.Subscribe(std::move(listener));
 }
 
-void IndexCoordinator::removeIndexListener(std::uint64_t listenerId) {
-    onDidChange_.unsubscribe(listenerId);
+void IndexService::RemoveIndexListener(std::uint64_t listener_id) {
+    on_did_change_.Unsubscribe(listener_id);
 }
 
-void IndexCoordinator::publish() {
-    onDidChange_.publish({.snapshots = snapshots()});
+void IndexService::Publish() {
+    on_did_change_.Publish({.snapshots = Snapshots()});
 }
 
-void registerDefaultIndexProviders(IndexCoordinator& indexes, SearchService& search, CppSemanticIndex& cppIndex) {
-    indexes.addProvider(std::make_unique<SearchIndexProvider>(search));
-    indexes.addProvider(std::make_unique<CppSemanticIndexAdapter>(cppIndex));
+void RegisterDefaultIndexProviders(IndexService& indexes) {
+    indexes.RegisterProvider(std::make_unique<SearchIndexProvider>());
 }
 
-std::string toString(IndexStatus status) {
+std::string ToString(IndexStatus status) {
     switch (status) {
     case IndexStatus::Unknown:
         return "unknown";
@@ -215,24 +435,22 @@ std::string toString(IndexStatus status) {
     return "unknown";
 }
 
-Json toJson(const IndexSnapshot& snapshot) {
-    return Json::object({
-        {"id", Json(snapshot.id)},
-        {"kind", Json(snapshot.kind)},
-        {"status", Json(toString(snapshot.status))},
-        {"version", Json(static_cast<std::int64_t>(snapshot.version))},
-        {"itemCount", Json(static_cast<std::int64_t>(snapshot.itemCount))},
-        {"message", Json(snapshot.message)},
-        {"data", snapshot.data},
-    });
-}
-
-Json toJson(const std::vector<IndexSnapshot>& snapshots) {
-    Json::Array values;
-    for (const IndexSnapshot& snapshot : snapshots) {
-        values.push_back(toJson(snapshot));
+std::string ToString(IndexQueryKind kind) {
+    switch (kind) {
+    case IndexQueryKind::Files:
+        return "files";
+    case IndexQueryKind::Text:
+        return "text";
+    case IndexQueryKind::Symbols:
+        return "symbols";
+    case IndexQueryKind::References:
+        return "references";
+    case IndexQueryKind::Includes:
+        return "includes";
+    case IndexQueryKind::Custom:
+        return "custom";
     }
-    return Json::array(std::move(values));
+    return "files";
 }
 
 }

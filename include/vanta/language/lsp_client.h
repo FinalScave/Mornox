@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "vanta/platform/async.h"
-#include "vanta/platform/json.h"
+#include "vanta/core/value.h"
 #include "vanta/platform/process.h"
 #include "vanta/core/text.h"
 #include "vanta/vfs/uri.h"
@@ -18,41 +18,41 @@ namespace vanta {
 struct LspRequestResult {
     int id = 0;
     std::string method;
-    std::string rawRequest;
-    std::string rawResponse;
-    bool timedOut = false;
+    std::string raw_request;
+    std::string raw_response;
+    bool timed_out = false;
 };
 
 using LspResultCallback = std::function<void(LspRequestResult)>;
 
 class LspClient {
 public:
-    bool start(const std::filesystem::path& serverPath, const std::filesystem::path& workspaceRoot, std::string* errorMessage = nullptr);
-    bool running() const;
-    void stop();
+    bool Start(const std::filesystem::path& server_path, const std::filesystem::path& workspace_root, std::string* error_message = nullptr);
+    bool Running() const;
+    void Stop();
 
-    LspRequestResult initialize(const std::filesystem::path& workspaceRoot);
-    LspRequestResult completion(const Uri& file, TextPosition position);
-    LspRequestResult hover(const Uri& file, TextPosition position);
-    LspRequestResult definition(const Uri& file, TextPosition position);
-    LspRequestResult semanticTokensFull(const Uri& file);
-    void completionAsync(AsyncRuntime& runtime, Uri file, TextPosition position, LspResultCallback callback);
-    void hoverAsync(AsyncRuntime& runtime, Uri file, TextPosition position, LspResultCallback callback);
-    void notify(std::string method, Json params);
-    std::vector<Json> drainNotifications();
+    LspRequestResult Initialize(const std::filesystem::path& workspace_root);
+    LspRequestResult Completion(const Uri& file, TextPosition position);
+    LspRequestResult Hover(const Uri& file, TextPosition position);
+    LspRequestResult Definition(const Uri& file, TextPosition position);
+    LspRequestResult SemanticTokensFull(const Uri& file);
+    void CompletionAsync(AsyncRuntime& runtime, Uri file, TextPosition position, LspResultCallback callback);
+    void HoverAsync(AsyncRuntime& runtime, Uri file, TextPosition position, LspResultCallback callback);
+    void Notify(std::string method, Value params);
+    std::vector<Value> DrainNotifications();
 
 private:
-    LspRequestResult sendRequest(std::string method, Json params);
-    std::optional<std::string> readMessageBody();
-    std::optional<std::string> waitForResponseBody(int requestId);
-    static Json textDocumentPositionParams(const Uri& file, TextPosition position);
-    static std::string fileUri(const std::filesystem::path& file);
+    LspRequestResult SendRequest(std::string method, Value params);
+    std::optional<std::string> ReadMessageBody();
+    std::optional<std::string> WaitForResponseBody(int request_id);
+    static Value TextDocumentPositionParams(const Uri& file, TextPosition position);
+    static std::string FileUri(const std::filesystem::path& file);
 
     ChildProcess process_;
     std::mutex mutex_;
-    std::string readBuffer_;
-    std::vector<Json> notifications_;
-    int nextRequestId_ = 1;
+    std::string read_buffer_;
+    std::vector<Value> notifications_;
+    int next_request_id_ = 1;
 };
 
 }

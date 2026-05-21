@@ -3,13 +3,15 @@
 #include <cstddef>
 #include <map>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
+#include "vanta/core/registration.h"
 #include "vanta/core/diagnostic.h"
-#include "vanta/builtin/git/git_client.h"
-#include "vanta/platform/json.h"
+#include "vanta/core/value.h"
 #include "vanta/vfs/virtual_file.h"
+#include "vanta/workspace/git_service.h"
 
 namespace vanta {
 
@@ -27,18 +29,18 @@ enum class AgentContextItemKind {
 
 struct AgentContextRequest {
     std::string goal;
-    VirtualFile focusFile;
+    VirtualFile focus_file;
     std::vector<Diagnostic> diagnostics;
-    std::size_t maxItems = 32;
+    std::size_t max_items = 32;
 };
 
 struct AgentContextItem {
-    std::string providerId;
+    std::string provider_id;
     AgentContextItemKind kind = AgentContextItemKind::Text;
     std::string title;
     VirtualFile file;
     std::string text;
-    Json data;
+    std::optional<Value> payload;
 };
 
 struct AgentContext {
@@ -49,26 +51,24 @@ class AgentContextProvider {
 public:
     virtual ~AgentContextProvider() = default;
 
-    virtual std::string id() const = 0;
-    virtual std::vector<AgentContextItem> collect(const AgentContextRequest& request, WorkspaceContext& context) const = 0;
+    virtual std::string Id() const = 0;
+    virtual std::vector<AgentContextItem> Collect(const AgentContextRequest& request, WorkspaceContext& context) const = 0;
 };
 
 class AgentContextCollector {
 public:
-    void addProvider(std::unique_ptr<AgentContextProvider> provider);
-    void removeProvider(const std::string& providerId);
-    void clearProviders();
-    std::vector<std::string> providerIds() const;
-    AgentContext collect(const AgentContextRequest& request, WorkspaceContext& context) const;
+    RegistrationHandle RegisterProvider(std::unique_ptr<AgentContextProvider> provider);
+    void RemoveProvider(const std::string& provider_id);
+    void ClearProviders();
+    std::vector<std::string> ProviderIds() const;
+    AgentContext Collect(const AgentContextRequest& request, WorkspaceContext& context) const;
 
 private:
     std::map<std::string, std::unique_ptr<AgentContextProvider>> providers_;
 };
 
-void registerDefaultAgentContextProviders(AgentContextCollector& service);
-std::unique_ptr<AgentContextProvider> createGitDiffAgentContextProvider(const GitClient& git);
-std::string toString(AgentContextItemKind kind);
-Json toJson(const AgentContextItem& item);
-Json toJson(const AgentContext& context);
+void RegisterDefaultAgentContextProviders(AgentContextCollector& service);
+std::unique_ptr<AgentContextProvider> CreateGitDiffAgentContextProvider(const GitService& git);
+std::string ToString(AgentContextItemKind kind);
 
 }

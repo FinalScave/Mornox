@@ -22,14 +22,14 @@ public:
     explicit FseventsFileWatcher(const VirtualFileSystem& vfs) : vfs_(vfs) {}
 
     ~FseventsFileWatcher() override {
-        stop();
+        Stop();
     }
 
-    bool start(const VirtualFile& root, FileWatchCallback callback, std::string* errorMessage) override {
-        auto localPath = root.localPath();
-        if (!localPath) {
-            if (errorMessage != nullptr) {
-                *errorMessage = "File watcher requires a local root";
+    bool Start(const VirtualFile& root, FileWatchCallback callback, std::string* error_message) override {
+        auto local_path = root.LocalPath();
+        if (!local_path) {
+            if (error_message != nullptr) {
+                *error_message = "File watcher requires a local root";
             }
             return false;
         }
@@ -38,68 +38,68 @@ public:
         }
 
         callback_ = std::move(callback);
-        rootPath_ = *localPath;
+        root_path_ = *local_path;
 
-        if (!createStream(errorMessage)) {
+        if (!CreateStream(error_message)) {
             return false;
         }
         running_ = true;
         if (!FSEventStreamStart(stream_)) {
             running_ = false;
-            releaseStream();
-            if (errorMessage != nullptr) {
-                *errorMessage = "Failed to start FSEvents stream";
+            ReleaseStream();
+            if (error_message != nullptr) {
+                *error_message = "Failed to start FSEvents stream";
             }
             return false;
         }
         return true;
     }
 
-    void stop() override {
+    void Stop() override {
         if (!running_.load()) {
             return;
         }
         running_ = false;
-        releaseStream();
+        ReleaseStream();
     }
 
-    bool running() const override {
+    bool Running() const override {
         return running_.load();
     }
 
 private:
-    static void callback(
+    static void WatchCallback(
         ConstFSEventStreamRef,
-        void* clientCallBackInfo,
-        std::size_t numEvents,
-        void* eventPaths,
-        const FSEventStreamEventFlags eventFlags[],
+        void* client_callback_info,
+        std::size_t num_events,
+        void* event_paths,
+        const FSEventStreamEventFlags event_flags[],
         const FSEventStreamEventId[]) {
-        auto* watcher = static_cast<FseventsFileWatcher*>(clientCallBackInfo);
+        auto* watcher = static_cast<FseventsFileWatcher*>(client_callback_info);
         if (watcher == nullptr || !watcher->running_.load()) {
             return;
         }
 
-        auto** paths = static_cast<char**>(eventPaths);
-        for (std::size_t i = 0; i < numEvents; ++i) {
-            watcher->publish(paths[i], eventFlags[i]);
+        auto** paths = static_cast<char**>(event_paths);
+        for (std::size_t i = 0; i < num_events; ++i) {
+            watcher->Publish(paths[i], event_flags[i]);
         }
     }
 
-    bool createStream(std::string* errorMessage) {
-        const std::string root = rootPath_.string();
-        CFStringRef rootString = CFStringCreateWithCString(nullptr, root.c_str(), kCFStringEncodingUTF8);
-        if (rootString == nullptr) {
-            if (errorMessage != nullptr) {
-                *errorMessage = "Failed to create file watcher path";
+    bool CreateStream(std::string* error_message) {
+        const std::string root = root_path_.string();
+        CFStringRef root_string = CFStringCreateWithCString(nullptr, root.c_str(), kCFStringEncodingUTF8);
+        if (root_string == nullptr) {
+            if (error_message != nullptr) {
+                *error_message = "Failed to create file watcher path";
             }
             return false;
         }
-        CFArrayRef paths = CFArrayCreate(nullptr, reinterpret_cast<const void**>(&rootString), 1, &kCFTypeArrayCallBacks);
-        CFRelease(rootString);
+        CFArrayRef paths = CFArrayCreate(nullptr, reinterpret_cast<const void**>(&root_string), 1, &kCFTypeArrayCallBacks);
+        CFRelease(root_string);
         if (paths == nullptr) {
-            if (errorMessage != nullptr) {
-                *errorMessage = "Failed to create file watcher path list";
+            if (error_message != nullptr) {
+                *error_message = "Failed to create file watcher path list";
             }
             return false;
         }
@@ -108,7 +108,7 @@ private:
         context.info = this;
         stream_ = FSEventStreamCreate(
             nullptr,
-            &FseventsFileWatcher::callback,
+            &FseventsFileWatcher::WatchCallback,
             &context,
             paths,
             kFSEventStreamEventIdSinceNow,
@@ -117,8 +117,8 @@ private:
         CFRelease(paths);
 
         if (stream_ == nullptr) {
-            if (errorMessage != nullptr) {
-                *errorMessage = "Failed to create FSEvents stream";
+            if (error_message != nullptr) {
+                *error_message = "Failed to create FSEvents stream";
             }
             return false;
         }
@@ -128,7 +128,7 @@ private:
         return true;
     }
 
-    void releaseStream() {
+    void ReleaseStream() {
         std::lock_guard<std::mutex> lock(mutex_);
         if (stream_ != nullptr) {
             FSEventStreamStop(stream_);
@@ -142,7 +142,7 @@ private:
         }
     }
 
-    void publish(const char* path, FSEventStreamEventFlags flags) const {
+    void Publish(const char* path, FSEventStreamEventFlags flags) const {
         if (callback_ == nullptr || path == nullptr) {
             return;
         }
@@ -154,14 +154,14 @@ private:
             kind = VirtualFileChangeKind::Deleted;
         }
         callback_({
-            .file = vfs_.localFile(std::filesystem::path(path)),
+            .file = vfs_.LocalFile(std::filesystem::path(path)),
             .kind = kind,
         });
     }
 
     const VirtualFileSystem& vfs_;
     FileWatchCallback callback_;
-    std::filesystem::path rootPath_;
+    std::filesystem::path root_path_;
     mutable std::mutex mutex_;
     FSEventStreamRef stream_ = nullptr;
     dispatch_queue_t queue_ = nullptr;
@@ -173,14 +173,14 @@ public:
     explicit DispatchDirectoryFileWatcher(const VirtualFileSystem& vfs) : vfs_(vfs) {}
 
     ~DispatchDirectoryFileWatcher() override {
-        stop();
+        Stop();
     }
 
-    bool start(const VirtualFile& root, FileWatchCallback callback, std::string* errorMessage) override {
-        auto localPath = root.localPath();
-        if (!localPath) {
-            if (errorMessage != nullptr) {
-                *errorMessage = "Directory watcher requires a local root";
+    bool Start(const VirtualFile& root, FileWatchCallback callback, std::string* error_message) override {
+        auto local_path = root.LocalPath();
+        if (!local_path) {
+            if (error_message != nullptr) {
+                *error_message = "Directory watcher requires a local root";
             }
             return false;
         }
@@ -189,31 +189,31 @@ public:
         }
 
         callback_ = std::move(callback);
-        rootPath_ = *localPath;
+        root_path_ = *local_path;
         queue_ = dispatch_queue_create("dev.vanta.directory-watcher", DISPATCH_QUEUE_SERIAL);
         running_ = true;
-        registerTree(rootPath_);
+        RegisterTree(root_path_);
 
         if (sources_.empty()) {
             running_ = false;
-            releaseSources();
-            if (errorMessage != nullptr) {
-                *errorMessage = "No directories could be watched";
+            ReleaseSources();
+            if (error_message != nullptr) {
+                *error_message = "No directories could be watched";
             }
             return false;
         }
         return true;
     }
 
-    void stop() override {
+    void Stop() override {
         if (!running_.load() && sources_.empty()) {
             return;
         }
         running_ = false;
-        releaseSources();
+        ReleaseSources();
     }
 
-    bool running() const override {
+    bool Running() const override {
         return running_.load();
     }
 
@@ -225,7 +225,7 @@ private:
         std::filesystem::path path;
     };
 
-    static void handleEvent(void* value) {
+    static void HandleEvent(void* value) {
         auto* context = static_cast<WatchContext*>(value);
         if (context == nullptr || context->watcher == nullptr || !context->watcher->running_.load()) {
             return;
@@ -236,10 +236,10 @@ private:
         if ((flags & DISPATCH_VNODE_DELETE) != 0 || (flags & DISPATCH_VNODE_RENAME) != 0) {
             kind = VirtualFileChangeKind::Deleted;
         }
-        context->watcher->publish(context->path, kind);
+        context->watcher->Publish(context->path, kind);
     }
 
-    static void handleCancel(void* value) {
+    static void HandleCancel(void* value) {
         auto* context = static_cast<WatchContext*>(value);
         if (context == nullptr) {
             return;
@@ -251,21 +251,21 @@ private:
         delete context;
     }
 
-    void registerTree(const std::filesystem::path& root) {
-        registerDirectory(root);
+    void RegisterTree(const std::filesystem::path& root) {
+        RegisterDirectory(root);
         std::error_code error;
         for (const auto& entry : std::filesystem::recursive_directory_iterator(root, error)) {
             if (error) {
                 break;
             }
-            std::error_code statusError;
-            if (entry.is_directory(statusError) && !statusError) {
-                registerDirectory(entry.path());
+            std::error_code status_error;
+            if (entry.is_directory(status_error) && !status_error) {
+                RegisterDirectory(entry.path());
             }
         }
     }
 
-    void registerDirectory(const std::filesystem::path& path) {
+    void RegisterDirectory(const std::filesystem::path& path) {
         const int fd = open(path.c_str(), O_EVTONLY);
         if (fd < 0) {
             return;
@@ -281,13 +281,13 @@ private:
 
         auto* context = new WatchContext{this, source, fd, path};
         dispatch_set_context(source, context);
-        dispatch_source_set_event_handler_f(source, &DispatchDirectoryFileWatcher::handleEvent);
-        dispatch_source_set_cancel_handler_f(source, &DispatchDirectoryFileWatcher::handleCancel);
+        dispatch_source_set_event_handler_f(source, &DispatchDirectoryFileWatcher::HandleEvent);
+        dispatch_source_set_cancel_handler_f(source, &DispatchDirectoryFileWatcher::HandleCancel);
         sources_.push_back(source);
         dispatch_resume(source);
     }
 
-    void releaseSources() {
+    void ReleaseSources() {
         std::lock_guard<std::mutex> lock(mutex_);
         for (dispatch_source_t source : sources_) {
             dispatch_source_cancel(source);
@@ -300,19 +300,19 @@ private:
         }
     }
 
-    void publish(const std::filesystem::path& path, VirtualFileChangeKind kind) const {
+    void Publish(const std::filesystem::path& path, VirtualFileChangeKind kind) const {
         if (callback_ == nullptr) {
             return;
         }
         callback_({
-            .file = vfs_.localFile(path),
+            .file = vfs_.LocalFile(path),
             .kind = kind,
         });
     }
 
     const VirtualFileSystem& vfs_;
     FileWatchCallback callback_;
-    std::filesystem::path rootPath_;
+    std::filesystem::path root_path_;
     mutable std::mutex mutex_;
     dispatch_queue_t queue_ = nullptr;
     std::vector<dispatch_source_t> sources_;
@@ -324,35 +324,35 @@ public:
     explicit MacFileWatcher(const VirtualFileSystem& vfs)
         : fsevents_(vfs), directories_(vfs) {}
 
-    bool start(const VirtualFile& root, FileWatchCallback callback, std::string* errorMessage) override {
-        std::string fseventsError;
-        FileWatchCallback fallbackCallback = callback;
-        if (fsevents_.start(root, std::move(callback), &fseventsError)) {
+    bool Start(const VirtualFile& root, FileWatchCallback callback, std::string* error_message) override {
+        std::string fsevents_error;
+        FileWatchCallback fallback_callback = callback;
+        if (fsevents_.Start(root, std::move(callback), &fsevents_error)) {
             active_ = &fsevents_;
             return true;
         }
 
-        std::string directoryError;
-        if (directories_.start(root, std::move(fallbackCallback), &directoryError)) {
+        std::string directory_error;
+        if (directories_.Start(root, std::move(fallback_callback), &directory_error)) {
             active_ = &directories_;
             return true;
         }
 
-        if (errorMessage != nullptr) {
-            *errorMessage = fseventsError.empty() ? directoryError : fseventsError + "; " + directoryError;
+        if (error_message != nullptr) {
+            *error_message = fsevents_error.empty() ? directory_error : fsevents_error + "; " + directory_error;
         }
         return false;
     }
 
-    void stop() override {
+    void Stop() override {
         if (active_ != nullptr) {
-            active_->stop();
+            active_->Stop();
             active_ = nullptr;
         }
     }
 
-    bool running() const override {
-        return active_ != nullptr && active_->running();
+    bool Running() const override {
+        return active_ != nullptr && active_->Running();
     }
 
 private:
@@ -365,22 +365,22 @@ private:
 
 class UnsupportedFileWatcher final : public FileWatcher {
 public:
-    bool start(const VirtualFile&, FileWatchCallback, std::string* errorMessage) override {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Platform file watcher is not implemented";
+    bool Start(const VirtualFile&, FileWatchCallback, std::string* error_message) override {
+        if (error_message != nullptr) {
+            *error_message = "Platform file watcher is not implemented";
         }
         return false;
     }
 
-    void stop() override {}
-    bool running() const override { return false; }
+    void Stop() override {}
+    bool Running() const override { return false; }
 };
 
 #endif
 
 }
 
-std::unique_ptr<FileWatcher> createPlatformFileWatcher(const VirtualFileSystem& vfs) {
+std::unique_ptr<FileWatcher> CreatePlatformFileWatcher(const VirtualFileSystem& vfs) {
 #if defined(__APPLE__)
     return std::make_unique<MacFileWatcher>(vfs);
 #else
@@ -389,7 +389,7 @@ std::unique_ptr<FileWatcher> createPlatformFileWatcher(const VirtualFileSystem& 
 #endif
 }
 
-std::string toString(VirtualFileChangeKind kind) {
+std::string ToString(VirtualFileChangeKind kind) {
     switch (kind) {
     case VirtualFileChangeKind::Created:
         return "created";

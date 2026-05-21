@@ -6,7 +6,7 @@
 namespace vanta {
 namespace {
 
-std::vector<WorkspaceInitializationStage> orderedStages() {
+std::vector<WorkspaceInitializationStage> OrderedStages() {
     return {
         WorkspaceInitializationStage::WorkspaceOpened,
         WorkspaceInitializationStage::ProjectModelResolved,
@@ -20,45 +20,42 @@ std::vector<WorkspaceInitializationStage> orderedStages() {
 
 }
 
-void WorkspaceInitializationPipeline::reset() {
+void WorkspaceInitializationPipeline::Reset() {
     steps_.clear();
-    for (WorkspaceInitializationStage stage : orderedStages()) {
-        ensure(stage);
+    for (WorkspaceInitializationStage stage : OrderedStages()) {
+        Ensure(stage);
     }
 }
 
-void WorkspaceInitializationPipeline::start(WorkspaceInitializationStage stage, std::string message) {
-    WorkspaceInitializationStep& value = ensure(stage);
+void WorkspaceInitializationPipeline::Start(WorkspaceInitializationStage stage, std::string message) {
+    WorkspaceInitializationStep& value = Ensure(stage);
     value.status = WorkspaceInitializationStatus::Running;
     value.message = std::move(message);
-    value.data = Json::object();
-    publish(value);
+    Publish(value);
 }
 
-void WorkspaceInitializationPipeline::complete(WorkspaceInitializationStage stage, std::string message, Json data) {
-    WorkspaceInitializationStep& value = ensure(stage);
+void WorkspaceInitializationPipeline::Complete(WorkspaceInitializationStage stage, std::string message) {
+    WorkspaceInitializationStep& value = Ensure(stage);
     value.status = WorkspaceInitializationStatus::Completed;
     value.message = std::move(message);
-    value.data = std::move(data);
-    publish(value);
+    Publish(value);
 }
 
-void WorkspaceInitializationPipeline::fail(WorkspaceInitializationStage stage, std::string message, Json data) {
-    WorkspaceInitializationStep& value = ensure(stage);
+void WorkspaceInitializationPipeline::Fail(WorkspaceInitializationStage stage, std::string message) {
+    WorkspaceInitializationStep& value = Ensure(stage);
     value.status = WorkspaceInitializationStatus::Failed;
     value.message = std::move(message);
-    value.data = std::move(data);
-    publish(value);
+    Publish(value);
 }
 
-std::optional<WorkspaceInitializationStep> WorkspaceInitializationPipeline::step(WorkspaceInitializationStage stage) const {
+std::optional<WorkspaceInitializationStep> WorkspaceInitializationPipeline::Step(WorkspaceInitializationStage stage) const {
     auto it = steps_.find(stage);
     return it == steps_.end() ? std::nullopt : std::optional<WorkspaceInitializationStep>(it->second);
 }
 
-std::vector<WorkspaceInitializationStep> WorkspaceInitializationPipeline::steps() const {
+std::vector<WorkspaceInitializationStep> WorkspaceInitializationPipeline::Steps() const {
     std::vector<WorkspaceInitializationStep> values;
-    for (WorkspaceInitializationStage stage : orderedStages()) {
+    for (WorkspaceInitializationStage stage : OrderedStages()) {
         auto it = steps_.find(stage);
         if (it != steps_.end()) {
             values.push_back(it->second);
@@ -67,33 +64,30 @@ std::vector<WorkspaceInitializationStep> WorkspaceInitializationPipeline::steps(
     return values;
 }
 
-bool WorkspaceInitializationPipeline::completed(WorkspaceInitializationStage stage) const {
-    auto value = step(stage);
+bool WorkspaceInitializationPipeline::Completed(WorkspaceInitializationStage stage) const {
+    auto value = Step(stage);
     return value && value->status == WorkspaceInitializationStatus::Completed;
 }
 
-std::uint64_t WorkspaceInitializationPipeline::onDidChangeStep(EventBus<WorkspaceInitializationChangeEvent>::Listener listener) {
-    return onDidChange_.subscribe(std::move(listener));
+std::uint64_t WorkspaceInitializationPipeline::OnDidChangeStep(EventBus<WorkspaceInitializationChangeEvent>::Listener listener) {
+    return on_did_change_.Subscribe(std::move(listener));
 }
 
-void WorkspaceInitializationPipeline::removeStepListener(std::uint64_t listenerId) {
-    onDidChange_.unsubscribe(listenerId);
+void WorkspaceInitializationPipeline::RemoveStepListener(std::uint64_t listener_id) {
+    on_did_change_.Unsubscribe(listener_id);
 }
 
-WorkspaceInitializationStep& WorkspaceInitializationPipeline::ensure(WorkspaceInitializationStage stage) {
+WorkspaceInitializationStep& WorkspaceInitializationPipeline::Ensure(WorkspaceInitializationStage stage) {
     WorkspaceInitializationStep& value = steps_[stage];
     value.stage = stage;
-    if (!value.data.isObject()) {
-        value.data = Json::object();
-    }
     return value;
 }
 
-void WorkspaceInitializationPipeline::publish(const WorkspaceInitializationStep& step) {
-    onDidChange_.publish({.step = step});
+void WorkspaceInitializationPipeline::Publish(const WorkspaceInitializationStep& step) {
+    on_did_change_.Publish({.step = step});
 }
 
-std::string toString(WorkspaceInitializationStage stage) {
+std::string ToString(WorkspaceInitializationStage stage) {
     switch (stage) {
     case WorkspaceInitializationStage::WorkspaceOpened:
         return "workspaceOpened";
@@ -113,7 +107,7 @@ std::string toString(WorkspaceInitializationStage stage) {
     return "workspaceOpened";
 }
 
-std::string toString(WorkspaceInitializationStatus status) {
+std::string ToString(WorkspaceInitializationStatus status) {
     switch (status) {
     case WorkspaceInitializationStatus::Pending:
         return "pending";
@@ -125,23 +119,6 @@ std::string toString(WorkspaceInitializationStatus status) {
         return "failed";
     }
     return "pending";
-}
-
-Json toJson(const WorkspaceInitializationStep& step) {
-    return Json::object({
-        {"stage", Json(toString(step.stage))},
-        {"status", Json(toString(step.status))},
-        {"message", Json(step.message)},
-        {"data", step.data},
-    });
-}
-
-Json toJson(const std::vector<WorkspaceInitializationStep>& steps) {
-    Json::Array values;
-    for (const WorkspaceInitializationStep& step : steps) {
-        values.push_back(toJson(step));
-    }
-    return Json::array(std::move(values));
 }
 
 }

@@ -12,49 +12,49 @@
 #include "vanta/core/registration.h"
 #include "vanta/execution/execution_service.h"
 #include "vanta/execution/execution_protocol.h"
-#include "vanta/platform/json.h"
 
 namespace vanta {
 
 struct BuildState;
 class WorkspaceContext;
+struct ProjectModel;
 
 struct BuildEnvironment {
-    std::string providerId;
+    std::string provider_id;
     bool detected = false;
-    std::filesystem::path buildDirectory;
-    Json metadata;
+    std::filesystem::path build_directory;
 };
 
-enum class BuildTaskKind {
+enum class BuildRequestKind {
     Build,
     Test,
 };
 
-struct BuildTask {
-    BuildTaskKind kind = BuildTaskKind::Build;
-    std::string providerId;
-    std::string target;
-    std::string executionTargetId;
-    std::filesystem::path buildDirectory;
-    JobId jobId = 0;
+struct BuildRequest {
+    BuildRequestKind kind = BuildRequestKind::Build;
+    std::string provider_id;
+    std::string profile_id;
+    std::string target_id;
+    std::string execution_target_id;
+    std::filesystem::path build_directory_override;
+    JobId job_id = 0;
 };
 
 struct BuildStep {
     std::string title;
     ExecutionRequest request;
-    bool parseDiagnostics = true;
+    bool parse_diagnostics = true;
+    std::filesystem::path diagnostic_base_directory;
 };
 
 struct BuildPlan {
-    std::string providerId;
+    std::string provider_id;
     std::string title;
     std::vector<BuildStep> steps;
-    Json metadata;
 };
 
 struct BuildResult {
-    int exitCode = -1;
+    int exit_code = -1;
     std::string output;
     std::vector<Diagnostic> diagnostics;
     std::vector<ExecutionEvent> events;
@@ -73,15 +73,15 @@ public:
     BuildHandle() = default;
     BuildHandle(JobHandle job, std::shared_ptr<BuildState> state);
 
-    JobId jobId() const;
-    JobHandle jobHandle() const;
-    BuildStatus status() const;
-    bool running() const;
-    void cancel();
-    BuildResult wait();
-    std::optional<BuildResult> result() const;
-    std::vector<ExecutionEvent> events() const;
-    bool valid() const;
+    JobId JobIdValue() const;
+    JobHandle JobHandleValue() const;
+    BuildStatus Status() const;
+    bool Running() const;
+    void Cancel();
+    BuildResult Wait();
+    std::optional<BuildResult> ResultValue() const;
+    std::vector<ExecutionEvent> EventsValue() const;
+    bool Valid() const;
 
 private:
     JobHandle job_;
@@ -92,58 +92,31 @@ class BuildProvider {
 public:
     virtual ~BuildProvider() = default;
 
-    virtual std::string id() const = 0;
-    virtual BuildEnvironment detect(const std::filesystem::path& workspaceRoot) const = 0;
-    virtual BuildPlan plan(const std::filesystem::path& workspaceRoot, const BuildTask& task) const = 0;
+    virtual std::string Id() const = 0;
+    virtual BuildEnvironment Detect(WorkspaceContext& context, const ProjectModel& project) const = 0;
+    virtual BuildPlan Plan(WorkspaceContext& context, const BuildRequest& request) const = 0;
 };
 
 class BuildService {
 public:
     virtual ~BuildService() = default;
 
-    virtual void addProvider(std::unique_ptr<BuildProvider> provider) = 0;
-    virtual RegistrationHandle registerProvider(std::unique_ptr<BuildProvider> provider) = 0;
-    virtual void removeProvider(const std::string& providerId) = 0;
-    virtual std::vector<std::string> buildProviderIds() const = 0;
-    virtual BuildEnvironment detect(const std::filesystem::path& workspaceRoot) const = 0;
-    virtual BuildHandle start(
+    virtual RegistrationHandle RegisterProvider(std::unique_ptr<BuildProvider> provider) = 0;
+    virtual void RemoveProvider(const std::string& provider_id) = 0;
+    virtual std::vector<std::string> BuildProviderIds() const = 0;
+    virtual BuildEnvironment Detect(WorkspaceContext& context, const ProjectModel& project) const = 0;
+    virtual BuildHandle Start(
         WorkspaceContext& context,
-        const std::filesystem::path& workspaceRoot,
-        const BuildTask& task,
-        ExecutionEventCallback onEvent = {}) const = 0;
-    virtual BuildResult run(
+        const BuildRequest& request,
+        ExecutionEventCallback on_event = {}) const = 0;
+    virtual BuildResult Run(
         WorkspaceContext& context,
-        const std::filesystem::path& workspaceRoot,
-        const BuildTask& task,
-        ExecutionEventCallback onEvent = {}) const = 0;
+        const BuildRequest& request,
+        ExecutionEventCallback on_event = {}) const = 0;
 };
 
-class DefaultBuildService final : public BuildService {
-public:
-    void addProvider(std::unique_ptr<BuildProvider> provider) override;
-    RegistrationHandle registerProvider(std::unique_ptr<BuildProvider> provider) override;
-    void removeProvider(const std::string& providerId) override;
-    std::vector<std::string> buildProviderIds() const override;
-    BuildEnvironment detect(const std::filesystem::path& workspaceRoot) const override;
-    BuildHandle start(
-        WorkspaceContext& context,
-        const std::filesystem::path& workspaceRoot,
-        const BuildTask& task,
-        ExecutionEventCallback onEvent = {}) const override;
-    BuildResult run(
-        WorkspaceContext& context,
-        const std::filesystem::path& workspaceRoot,
-        const BuildTask& task,
-        ExecutionEventCallback onEvent = {}) const override;
-
-private:
-    const BuildProvider* chooseProvider(const std::filesystem::path& workspaceRoot, const BuildTask& task) const;
-
-    std::map<std::string, std::unique_ptr<BuildProvider>> providers_;
-};
-
-std::string toString(BuildTaskKind kind);
-std::string toString(BuildStatus status);
+std::string ToString(BuildRequestKind kind);
+std::string ToString(BuildStatus status);
 
 using BuildCancellationCheck = std::function<bool()>;
 class AsyncRuntime;
@@ -151,11 +124,11 @@ class JobService;
 
 using BuildOperation = std::function<BuildResult(ExecutionEventCallback, BuildCancellationCheck)>;
 
-BuildHandle startBuildOperation(
+BuildHandle StartBuildOperation(
     JobService& jobs,
     AsyncRuntime& runtime,
-    JobId jobId,
+    JobId job_id,
     BuildOperation operation,
-    ExecutionEventCallback onEvent = {});
+    ExecutionEventCallback on_event = {});
 
 }

@@ -10,15 +10,15 @@ public:
     Uri() = default;
     explicit Uri(std::string value);
 
-    static Uri parse(std::string value);
-    static Uri fromLocalPath(const std::filesystem::path& path);
+    static Uri Parse(std::string value);
+    static Uri FromLocalPath(const std::filesystem::path& path);
 
-    bool empty() const noexcept;
-    const std::string& string() const noexcept;
-    std::string scheme() const;
-    std::string path() const;
-    std::string filename() const;
-    std::string extension() const;
+    bool Empty() const noexcept;
+    const std::string& ToString() const noexcept;
+    std::string Scheme() const;
+    std::string Path() const;
+    std::string Filename() const;
+    std::string Extension() const;
 
     bool operator==(const Uri& other) const noexcept;
     bool operator!=(const Uri& other) const noexcept;

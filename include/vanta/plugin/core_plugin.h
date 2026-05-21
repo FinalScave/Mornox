@@ -15,27 +15,30 @@ class CoreExtension {
 public:
     virtual ~CoreExtension() = default;
 
-    virtual void activate(ExtensionContext& context) = 0;
-    virtual void deactivate();
+    virtual void Activate(ExtensionContext& context) = 0;
+    virtual void Deactivate();
 };
 
 using CoreExtensionFactory = std::function<std::unique_ptr<CoreExtension>()>;
 
 class CorePluginRegistry {
 public:
-    void add(std::string entry, CoreExtensionFactory factory);
-    std::unique_ptr<CoreExtension> create(const std::string& entry) const;
-    std::vector<std::string> entries() const;
+    void Add(std::string entry, CoreExtensionFactory factory);
+    std::unique_ptr<CoreExtension> Create(const std::string& entry) const;
+    std::vector<std::string> Entries() const;
 
 private:
     std::map<std::string, CoreExtensionFactory> factories_;
 };
 
-struct CorePluginDependencies {
-    std::filesystem::path clicePath;
-    std::filesystem::path workspaceRoot;
+struct ClicePluginConfig {
+    std::filesystem::path server_path;
 };
 
-CorePluginRegistry createDefaultCorePluginRegistry(CorePluginDependencies dependencies = {});
+struct CorePluginDependencies {
+    ClicePluginConfig clice;
+};
+
+CorePluginRegistry CreateDefaultCorePluginRegistry(CorePluginDependencies dependencies = {});
 
 }

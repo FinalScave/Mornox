@@ -9,18 +9,18 @@ namespace vanta {
 
 class DocumentLanguageSynchronizer {
 public:
-    DocumentLanguageSynchronizer(DocumentService& documents, DefaultLanguageRegistry& languages);
+    DocumentLanguageSynchronizer(DocumentService& documents, LanguageRegistry& languages);
     ~DocumentLanguageSynchronizer();
 
-    void start();
-    void stop();
+    void Start();
+    void Stop();
 
 private:
-    void handleChange(const DocumentChangeEvent& event);
+    void HandleChange(const DocumentChangeEvent& event);
 
     DocumentService& documents_;
-    DefaultLanguageRegistry& languages_;
-    std::uint64_t listenerId_ = 0;
+    LanguageRegistry& languages_;
+    std::uint64_t listener_id_ = 0;
 };
 
 }

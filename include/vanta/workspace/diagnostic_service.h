@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "vanta/core/diagnostic.h"
-#include "vanta/platform/async.h"
+#include "vanta/core/event.h"
 
 namespace vanta {
 
@@ -16,17 +16,17 @@ struct DiagnosticChangeEvent {
 
 class DiagnosticService {
 public:
-    void publish(std::string source, std::vector<Diagnostic> diagnostics);
-    void clear(const std::string& source);
-    std::vector<Diagnostic> diagnosticsForFile(const VirtualFile& file) const;
-    std::vector<Diagnostic> allDiagnostics() const;
+    void Publish(std::string source, std::vector<Diagnostic> diagnostics);
+    void Clear(const std::string& source);
+    std::vector<Diagnostic> DiagnosticsForFile(const VirtualFile& file) const;
+    std::vector<Diagnostic> AllDiagnostics() const;
 
-    std::uint64_t onDidChangeDiagnostics(EventBus<DiagnosticChangeEvent>::Listener listener);
-    void removeDiagnosticsListener(std::uint64_t listenerId);
+    std::uint64_t OnDidChangeDiagnostics(EventBus<DiagnosticChangeEvent>::Listener listener);
+    void RemoveDiagnosticsListener(std::uint64_t listener_id);
 
 private:
-    std::map<std::string, std::vector<Diagnostic>> diagnosticsBySource_;
-    EventBus<DiagnosticChangeEvent> onDidChange_;
+    std::map<std::string, std::vector<Diagnostic>> diagnostics_by_source_;
+    EventBus<DiagnosticChangeEvent> on_did_change_;
 };
 
 }

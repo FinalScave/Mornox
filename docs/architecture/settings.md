@@ -7,19 +7,19 @@ Vanta settings are UI-independent. The platform stores typed values, setting def
 - `SettingNode` organizes settings into a domain hierarchy. It is not a UI page.
 - `SettingDefinition` describes one typed setting and the scopes where it can be configured.
 - `SettingScope` describes where a value applies: `Ide`, `Workspace`, `Project`, or `Language`.
-- `ownerId` identifies the plugin or platform module that contributed a setting. It is not a scope.
+- `owner_id` identifies the plugin or platform module that contributed a setting. It is not a scope.
 - `SettingsStore` persists values for one concrete scope.
 - `SettingQuery` provides the current workspace, project, and language for resolution.
 - `SettingResolution` returns the effective value and the scope that supplied it.
 
 ## Scope Resolution
 
-Each setting declares `supportedScopes` and may declare `resolutionOrder`.
+Each setting declares `supported_scopes` and may declare `resolution_order`.
 
 Examples:
 
 - `editor.formatOnSave`: `Language > Workspace > Ide`
-- `cmake.buildDirectory`: `Project > Workspace`
+- Plugin-contributed project settings can use `Project > Workspace`
 - `ai.agent.model`: `Project > Workspace > Ide`
 
 If no scoped value exists, the setting default is used.
@@ -41,4 +41,6 @@ Stored values include their type:
 }
 ```
 
-Plugins should use `ExtensionContext::settings()` to contribute setting nodes and definitions. Plugin-private caches and state should use plugin storage or component state, not settings.
+Plugins should use `ExtensionContext::workspaceContext().Settings()` to
+contribute setting nodes and definitions. Plugin-private caches and state should
+use plugin storage or component state, not settings.

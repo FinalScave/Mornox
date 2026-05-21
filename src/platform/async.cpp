@@ -10,57 +10,57 @@ CancellationToken::CancellationToken()
 CancellationToken::CancellationToken(std::shared_ptr<std::atomic_bool> cancelled)
     : cancelled_(std::move(cancelled)) {}
 
-bool CancellationToken::cancelled() const {
+bool CancellationToken::Cancelled() const {
     return cancelled_ != nullptr && cancelled_->load();
 }
 
 CancellationSource::CancellationSource()
     : cancelled_(std::make_shared<std::atomic_bool>(false)) {}
 
-CancellationToken CancellationSource::token() const {
+CancellationToken CancellationSource::Token() const {
     return CancellationToken(cancelled_);
 }
 
-void CancellationSource::cancel() {
+void CancellationSource::Cancel() {
     cancelled_->store(true);
 }
 
 ProgressReporter::ProgressReporter(Sink sink)
     : sink_(std::move(sink)) {}
 
-void ProgressReporter::report(ProgressEvent event) const {
+void ProgressReporter::Report(ProgressEvent event) const {
     if (sink_) {
         sink_(event);
     }
 }
 
-AsyncRuntime::AsyncRuntime(std::size_t workerCount) {
-    start(workerCount);
+AsyncRuntime::AsyncRuntime(std::size_t worker_count) {
+    Start(worker_count);
 }
 
 AsyncRuntime::~AsyncRuntime() {
-    stop();
+    Stop();
 }
 
-void AsyncRuntime::start(std::size_t workerCount) {
+void AsyncRuntime::Start(std::size_t worker_count) {
     if (!workers_.empty()) {
         return;
     }
     stopping_ = false;
-    const std::size_t count = workerCount == 0 ? std::max<std::size_t>(1, std::thread::hardware_concurrency()) : workerCount;
+    const std::size_t count = worker_count == 0 ? std::max<std::size_t>(1, std::thread::hardware_concurrency()) : worker_count;
     for (std::size_t i = 0; i < count; ++i) {
         workers_.emplace_back([this] {
-            workerLoop();
+            WorkerLoop();
         });
     }
 }
 
-void AsyncRuntime::stop() {
+void AsyncRuntime::Stop() {
     {
-        std::lock_guard<std::mutex> lock(workerMutex_);
+        std::lock_guard<std::mutex> lock(worker_mutex_);
         stopping_ = true;
     }
-    workerCondition_.notify_all();
+    worker_condition_.notify_all();
     for (std::thread& worker : workers_) {
         if (worker.joinable()) {
             worker.join();
@@ -69,49 +69,49 @@ void AsyncRuntime::stop() {
     workers_.clear();
 }
 
-void AsyncRuntime::postWorker(std::function<void()> task) {
+void AsyncRuntime::PostWorker(std::function<void()> task) {
     {
-        std::lock_guard<std::mutex> lock(workerMutex_);
-        workerQueue_.push(std::move(task));
+        std::lock_guard<std::mutex> lock(worker_mutex_);
+        worker_queue_.push(std::move(task));
     }
-    workerCondition_.notify_one();
+    worker_condition_.notify_one();
 }
 
-void AsyncRuntime::postMain(std::function<void()> task) {
-    std::lock_guard<std::mutex> lock(mainMutex_);
-    mainQueue_.push(std::move(task));
+void AsyncRuntime::PostMain(std::function<void()> task) {
+    std::lock_guard<std::mutex> lock(main_mutex_);
+    main_queue_.push(std::move(task));
 }
 
-std::size_t AsyncRuntime::drainMain() {
+std::size_t AsyncRuntime::DrainMain() {
     std::size_t count = 0;
     while (true) {
         std::function<void()> task;
         {
-            std::lock_guard<std::mutex> lock(mainMutex_);
-            if (mainQueue_.empty()) {
+            std::lock_guard<std::mutex> lock(main_mutex_);
+            if (main_queue_.empty()) {
                 return count;
             }
-            task = std::move(mainQueue_.front());
-            mainQueue_.pop();
+            task = std::move(main_queue_.front());
+            main_queue_.pop();
         }
         task();
         ++count;
     }
 }
 
-void AsyncRuntime::workerLoop() {
+void AsyncRuntime::WorkerLoop() {
     while (true) {
         std::function<void()> task;
         {
-            std::unique_lock<std::mutex> lock(workerMutex_);
-            workerCondition_.wait(lock, [this] {
-                return stopping_ || !workerQueue_.empty();
+            std::unique_lock<std::mutex> lock(worker_mutex_);
+            worker_condition_.wait(lock, [this] {
+                return stopping_ || !worker_queue_.empty();
             });
-            if (stopping_ && workerQueue_.empty()) {
+            if (stopping_ && worker_queue_.empty()) {
                 return;
             }
-            task = std::move(workerQueue_.front());
-            workerQueue_.pop();
+            task = std::move(worker_queue_.front());
+            worker_queue_.pop();
         }
         task();
     }

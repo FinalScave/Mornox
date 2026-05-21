@@ -4,28 +4,25 @@
 
 namespace vanta {
 
-void CapabilityRegistry::set(Capability capability) {
+void CapabilityRegistry::Set(Capability capability) {
     if (capability.id.empty()) {
         return;
     }
-    if (!capability.data.isObject()) {
-        capability.data = Json::object();
-    }
     const std::string id = capability.id;
     capabilities_[id] = std::move(capability);
-    publish(capabilities_.at(id));
+    Publish(capabilities_.at(id));
 }
 
-bool CapabilityRegistry::remove(const std::string& id) {
+bool CapabilityRegistry::Remove(const std::string& id) {
     return capabilities_.erase(id) > 0;
 }
 
-std::optional<Capability> CapabilityRegistry::capability(const std::string& id) const {
+std::optional<Capability> CapabilityRegistry::Get(const std::string& id) const {
     auto it = capabilities_.find(id);
     return it == capabilities_.end() ? std::nullopt : std::optional<Capability>(it->second);
 }
 
-std::vector<Capability> CapabilityRegistry::capabilities() const {
+std::vector<Capability> CapabilityRegistry::Capabilities() const {
     std::vector<Capability> values;
     for (const auto& [id, capability] : capabilities_) {
         (void)id;
@@ -34,28 +31,28 @@ std::vector<Capability> CapabilityRegistry::capabilities() const {
     return values;
 }
 
-bool CapabilityRegistry::available(const std::string& id) const {
-    auto value = capability(id);
+bool CapabilityRegistry::Available(const std::string& id) const {
+    auto value = Get(id);
     return value && value->status == CapabilityStatus::Available;
 }
 
-void CapabilityRegistry::clear() {
+void CapabilityRegistry::Clear() {
     capabilities_.clear();
 }
 
-std::uint64_t CapabilityRegistry::onDidChangeCapability(EventBus<CapabilityChangeEvent>::Listener listener) {
-    return onDidChange_.subscribe(std::move(listener));
+std::uint64_t CapabilityRegistry::OnDidChangeCapability(EventBus<CapabilityChangeEvent>::Listener listener) {
+    return on_did_change_.Subscribe(std::move(listener));
 }
 
-void CapabilityRegistry::removeCapabilityListener(std::uint64_t listenerId) {
-    onDidChange_.unsubscribe(listenerId);
+void CapabilityRegistry::RemoveCapabilityListener(std::uint64_t listener_id) {
+    on_did_change_.Unsubscribe(listener_id);
 }
 
-void CapabilityRegistry::publish(const Capability& capability) {
-    onDidChange_.publish({.capability = capability});
+void CapabilityRegistry::Publish(const Capability& capability) {
+    on_did_change_.Publish({.capability = capability});
 }
 
-std::string toString(CapabilityStatus status) {
+std::string ToString(CapabilityStatus status) {
     switch (status) {
     case CapabilityStatus::Initializing:
         return "initializing";
@@ -67,25 +64,6 @@ std::string toString(CapabilityStatus status) {
         return "unavailable";
     }
     return "unavailable";
-}
-
-Json toJson(const Capability& capability) {
-    return Json::object({
-        {"id", Json(capability.id)},
-        {"title", Json(capability.title)},
-        {"providerId", Json(capability.providerId)},
-        {"status", Json(toString(capability.status))},
-        {"message", Json(capability.message)},
-        {"data", capability.data},
-    });
-}
-
-Json toJson(const std::vector<Capability>& capabilities) {
-    Json::Array values;
-    for (const Capability& capability : capabilities) {
-        values.push_back(toJson(capability));
-    }
-    return Json::array(std::move(values));
 }
 
 }

@@ -5,7 +5,7 @@
 namespace vanta {
 namespace {
 
-const std::map<std::string, Permission>& permissionMap() {
+const std::map<std::string, Permission>& permission_map() {
     static const std::map<std::string, Permission> permissions = {
         {"workspace.read", Permission::WorkspaceRead},
         {"workspace.write", Permission::WorkspaceWrite},
@@ -13,36 +13,33 @@ const std::map<std::string, Permission>& permissionMap() {
         {"network.access", Permission::NetworkAccess},
         {"git.read", Permission::GitRead},
         {"git.write", Permission::GitWrite},
-        {"agent.tool", Permission::AgentTool},
-        {"language.service", Permission::LanguageService},
-        {"build.provider", Permission::BuildProvider},
     };
     return permissions;
 }
 
 }
 
-PermissionSet PermissionSet::fromStrings(const std::vector<std::string>& permissions) {
+PermissionSet PermissionSet::FromStrings(const std::vector<std::string>& permissions) {
     PermissionSet result;
     for (const std::string& permission : permissions) {
-        auto it = permissionMap().find(permission);
-        if (it != permissionMap().end()) {
-            result.add(it->second);
+        auto it = permission_map().find(permission);
+        if (it != permission_map().end()) {
+            result.Add(it->second);
         }
     }
     return result;
 }
 
-void PermissionSet::add(Permission permission) {
+void PermissionSet::Add(Permission permission) {
     permissions_.insert(permission);
 }
 
-bool PermissionSet::contains(Permission permission) const {
+bool PermissionSet::Contains(Permission permission) const {
     return permissions_.contains(permission);
 }
 
-std::string toString(Permission permission) {
-    for (const auto& [name, value] : permissionMap()) {
+std::string ToString(Permission permission) {
+    for (const auto& [name, value] : permission_map()) {
         if (value == permission) {
             return name;
         }

@@ -3,50 +3,35 @@
 #include <filesystem>
 #include <optional>
 #include <string>
-#include <vector>
 
 #include "vanta/vfs/virtual_file.h"
 #include "vanta/vfs/virtual_file_system.h"
 
 namespace vanta {
 
-struct FileTreeNode {
-    VirtualFile file;
-    std::string name;
-    bool directory = false;
-    std::vector<FileTreeNode> children;
-};
-
 struct WorkspaceInfo {
-    std::filesystem::path rootPath;
+    std::filesystem::path root_path;
     std::string name;
 };
 
 class Workspace {
 public:
-    void bindFileSystem(const VirtualFileSystem& vfs);
-    bool open(const std::filesystem::path& rootPath, std::string* errorMessage = nullptr);
+    void BindFileSystem(const VirtualFileSystem& vfs);
+    bool Open(const std::filesystem::path& root_path, std::string* error_message = nullptr);
 
-    const WorkspaceInfo& info() const;
-    const FileTreeNode& fileTree() const;
-    bool isOpen() const;
+    const WorkspaceInfo& Info() const;
+    bool IsOpen() const;
 
-    std::filesystem::path resolve(const std::filesystem::path& path) const;
-    VirtualFile file(const std::filesystem::path& path) const;
-    VirtualFile rootFile() const;
-    std::optional<std::string> readTextFile(const std::filesystem::path& path) const;
-    bool writeTextFile(const std::filesystem::path& path, const std::string& text, std::string* errorMessage = nullptr);
-    void refreshFileTree();
+    std::filesystem::path Resolve(const std::filesystem::path& path) const;
+    VirtualFile File(const std::filesystem::path& path) const;
+    VirtualFile RootFile() const;
+    std::optional<std::string> ReadTextFile(const std::filesystem::path& path) const;
+    bool WriteTextFile(const std::filesystem::path& path, const std::string& text, std::string* error_message = nullptr);
 
 private:
-    FileTreeNode buildFileTree(const std::filesystem::path& rootPath) const;
-
     WorkspaceInfo info_;
-    FileTreeNode fileTree_;
     const VirtualFileSystem* vfs_ = nullptr;
     bool open_ = false;
 };
-
-std::string renderFileTree(const FileTreeNode& node, std::size_t maxDepth = 4);
 
 }

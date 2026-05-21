@@ -9,48 +9,17 @@
 #include <vector>
 
 #include "vanta/agent/agent_context.h"
+#include "vanta/agent/agent_tool_registry.h"
 #include "vanta/core/diagnostic.h"
 #include "vanta/execution/build_service.h"
-#include "vanta/platform/json.h"
+#include "vanta/core/value.h"
 #include "vanta/vfs/virtual_file.h"
 #include "vanta/workspace/change_set_service.h"
-#include "vanta/workspace/search_service.h"
+#include "vanta/workspace/index_service.h"
 
 namespace vanta {
 
 class WorkspaceContext;
-
-enum class AgentRunStatus {
-    Pending,
-    CollectingContext,
-    Running,
-    WaitingForApproval,
-    Completed,
-    Failed,
-    Cancelled,
-};
-
-struct AgentRunRequest {
-    std::string goal;
-    VirtualFile focusFile;
-    std::vector<Diagnostic> diagnostics;
-    VirtualFile targetFile;
-    std::string replacementText;
-};
-
-struct AgentRunLogEntry {
-    std::string message;
-};
-
-struct AgentRun {
-    std::string id;
-    AgentRunRequest request;
-    AgentRunStatus status = AgentRunStatus::Pending;
-    AgentContext context;
-    std::vector<AgentRunLogEntry> log;
-    std::string changeSetId;
-    std::string error;
-};
 
 enum class AgentOperationKind {
     ReadFile,
@@ -79,19 +48,19 @@ struct AgentOperationRequest {
     Diagnostic diagnostic;
     std::string source = "agent";
     std::string title;
-    std::string replacementText;
-    std::uint64_t expectedDocumentVersion = 0;
-    BuildTask buildTask;
-    std::string toolId;
-    Json input;
+    std::string replacement_text;
+    std::uint64_t expected_document_version = 0;
+    BuildRequest build_request;
+    std::string tool_id;
+    Value input = Value::ObjectValue();
 };
 
 struct AgentOperationEvent {
-    std::string operationId;
+    std::string operation_id;
     AgentOperationKind kind = AgentOperationKind::ReadFile;
     AgentOperationStatus status = AgentOperationStatus::Started;
     std::string message;
-    Json data;
+    std::optional<Value> payload;
 };
 
 struct AgentOperationResult {
@@ -100,10 +69,10 @@ struct AgentOperationResult {
     std::string error;
     std::string message;
     std::string text;
-    std::vector<SearchHit> searchHits;
-    std::string changeSetId;
-    BuildResult buildResult;
-    Json data;
+    std::vector<IndexHit> search_hits;
+    std::string change_set_id;
+    BuildResult build_result;
+    std::optional<Value> payload;
 };
 
 using AgentOperationCallback = std::function<void(const AgentOperationEvent&)>;
@@ -112,25 +81,25 @@ struct AgentOperationRecord {
     std::string id;
     AgentOperationKind kind = AgentOperationKind::ReadFile;
     AgentOperationStatus status = AgentOperationStatus::Started;
-    std::string inputSummary;
-    std::string outputSummary;
+    std::string input_summary;
+    std::string output_summary;
     std::string error;
-    std::string changeSetId;
+    std::string change_set_id;
     bool ok = false;
     std::vector<AgentOperationEvent> events;
 };
 
 class AgentOperationJournal {
 public:
-    void recordStart(const AgentOperationRequest& request);
-    void recordEvent(const AgentOperationEvent& event);
-    void recordResult(const std::string& operationId, const AgentOperationResult& result);
-    std::optional<AgentOperationRecord> record(const std::string& operationId) const;
-    std::vector<AgentOperationRecord> records() const;
-    void clear();
+    void RecordStart(const AgentOperationRequest& request);
+    void RecordEvent(const AgentOperationEvent& event);
+    void RecordResult(const std::string& operation_id, const AgentOperationResult& result);
+    std::optional<AgentOperationRecord> Record(const std::string& operation_id) const;
+    std::vector<AgentOperationRecord> Records() const;
+    void Clear();
 
 private:
-    AgentOperationRecord& ensure(const std::string& operationId, AgentOperationKind kind);
+    AgentOperationRecord& Ensure(const std::string& operation_id, AgentOperationKind kind);
 
     std::map<std::string, AgentOperationRecord> records_;
     std::vector<std::string> order_;
@@ -138,39 +107,22 @@ private:
 
 class AgentOperationService {
 public:
-    void setJournal(AgentOperationJournal* journal);
-    AgentOperationJournal* journal() const;
+    void SetJournal(AgentOperationJournal* journal);
+    AgentOperationJournal* Journal() const;
 
-    AgentRun startRun(
-        WorkspaceContext& context,
-        AgentRunRequest request,
-        AgentOperationCallback onEvent = {});
-    bool cancelRun(const std::string& id);
-    std::optional<AgentRun> run(const std::string& id) const;
-    std::vector<AgentRun> runs() const;
-
-    AgentOperationResult execute(
+    AgentOperationResult Execute(
         WorkspaceContext& context,
         const AgentOperationRequest& request,
-        AgentOperationCallback onEvent = {}) const;
+        AgentOperationCallback on_event = {}) const;
 
 private:
-    AgentRun* mutableRun(const std::string& id);
-    void appendLog(AgentRun& run, std::string message) const;
-    std::string nextOperationId() const;
+    std::string NextOperationId() const;
 
     AgentOperationJournal* journal_ = nullptr;
-    std::map<std::string, AgentRun> runs_;
-    std::uint64_t nextRunId_ = 1;
-    mutable std::uint64_t nextOperationId_ = 1;
+    mutable std::uint64_t next_operation_id_ = 1;
 };
 
-std::string toString(AgentRunStatus status);
-std::string toString(AgentOperationKind kind);
-std::string toString(AgentOperationStatus status);
-Json toJson(const AgentRun& run);
-Json toJson(const AgentOperationRecord& record);
-Json toJson(const AgentOperationEvent& event);
-Json toJson(const AgentOperationResult& result);
+std::string ToString(AgentOperationKind kind);
+std::string ToString(AgentOperationStatus status);
 
 }

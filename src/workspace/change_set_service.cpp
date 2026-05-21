@@ -6,7 +6,7 @@
 namespace vanta {
 namespace {
 
-std::vector<std::string> splitLines(const std::string& text) {
+std::vector<std::string> SplitLines(const std::string& text) {
     std::vector<std::string> lines;
     std::istringstream stream(text);
     std::string line;
@@ -19,21 +19,21 @@ std::vector<std::string> splitLines(const std::string& text) {
     return lines;
 }
 
-std::string buildUnifiedDiff(const WorkspaceEdit& edit) {
+std::string BuildUnifiedDiff(const WorkspaceEdit& edit) {
     std::string diff;
     for (const WorkspaceEditOperation& operation : edit.operations) {
         if (operation.kind == WorkspaceEditOperationKind::ReplaceFile || operation.kind == WorkspaceEditOperationKind::CreateFile || operation.kind == WorkspaceEditOperationKind::DeleteFile) {
-            diff += createUnifiedDiff(operation.file, operation.originalText, operation.replacementText);
+            diff += CreateUnifiedDiff(operation.file, operation.original_text, operation.replacement_text);
         } else if (operation.kind == WorkspaceEditOperationKind::RenameFile) {
-            diff += "rename from " + operation.file.toUri().string() + '\n';
-            diff += "rename to " + operation.targetFile.toUri().string() + '\n';
+            diff += "rename from " + operation.file.ToUri().ToString() + '\n';
+            diff += "rename to " + operation.target_file.ToUri().ToString() + '\n';
         }
     }
     return diff;
 }
 
-ChangeSetResult removeLocalFile(const VirtualFile& file) {
-    const auto path = file.localPath();
+ChangeSetResult RemoveLocalFile(const VirtualFile& file) {
+    const auto path = file.LocalPath();
     if (!path) {
         return {false, "Delete operation requires a local file"};
     }
@@ -44,9 +44,9 @@ ChangeSetResult removeLocalFile(const VirtualFile& file) {
     return {true, "File deleted"};
 }
 
-ChangeSetResult renameLocalFile(const VirtualFile& file, const VirtualFile& targetFile) {
-    const auto source = file.localPath();
-    const auto target = targetFile.localPath();
+ChangeSetResult RenameLocalFile(const VirtualFile& file, const VirtualFile& target_file) {
+    const auto source = file.LocalPath();
+    const auto target = target_file.LocalPath();
     if (!source || !target) {
         return {false, "Rename operation requires local files"};
     }
@@ -65,74 +65,74 @@ ChangeSetResult renameLocalFile(const VirtualFile& file, const VirtualFile& targ
     return {true, "File renamed"};
 }
 
-WorkspaceEditPreflight conflict(WorkspaceEditOperationKind kind, VirtualFile file, std::string message, VirtualFile targetFile = {}) {
+WorkspaceEditPreflight Conflict(WorkspaceEditOperationKind kind, VirtualFile file, std::string message, VirtualFile target_file = {}) {
     return {
         .ok = false,
         .conflicts = {{
-            .operationKind = kind,
+            .operation_kind = kind,
             .file = std::move(file),
-            .targetFile = std::move(targetFile),
+            .target_file = std::move(target_file),
             .message = std::move(message),
         }},
     };
 }
 
-void appendConflicts(WorkspaceEditPreflight& target, WorkspaceEditPreflight source) {
+void AppendConflicts(WorkspaceEditPreflight& target, WorkspaceEditPreflight source) {
     if (!source.ok) {
         target.ok = false;
         target.conflicts.insert(target.conflicts.end(), source.conflicts.begin(), source.conflicts.end());
     }
 }
 
-std::string preflightMessage(const WorkspaceEditPreflight& preflight) {
+std::string PreflightMessage(const WorkspaceEditPreflight& preflight) {
     std::ostringstream stream;
     stream << "Change set has " << preflight.conflicts.size() << " conflict";
     if (preflight.conflicts.size() != 1) {
         stream << 's';
     }
     for (const WorkspaceEditConflict& conflict : preflight.conflicts) {
-        stream << "\n- " << toString(conflict.operationKind) << ' ' << conflict.file.toUri().string() << ": " << conflict.message;
+        stream << "\n- " << ToString(conflict.operation_kind) << ' ' << conflict.file.ToUri().ToString() << ": " << conflict.message;
     }
     return stream.str();
 }
 
 }
 
-ChangeSet ChangeSetService::create(
+ChangeSet ChangeSetService::Create(
     std::string source,
     std::string title,
     WorkspaceEdit edit) {
-    ChangeSet changeSet;
-    changeSet.id = "change-" + std::to_string(nextChangeSetId_++);
-    changeSet.source = std::move(source);
-    changeSet.title = std::move(title);
-    changeSet.edit = std::move(edit);
-    changeSet.unifiedDiff = buildUnifiedDiff(changeSet.edit);
+    ChangeSet change_set;
+    change_set.id = "change-" + std::to_string(next_change_set_id_++);
+    change_set.source = std::move(source);
+    change_set.title = std::move(title);
+    change_set.edit = std::move(edit);
+    change_set.unified_diff = BuildUnifiedDiff(change_set.edit);
 
-    changeSets_[changeSet.id] = changeSet;
-    return changeSet;
+    change_sets_[change_set.id] = change_set;
+    return change_set;
 }
 
-ChangeSet ChangeSetService::createFileReplacement(
+ChangeSet ChangeSetService::CreateFileReplacement(
     VirtualFile file,
     std::string source,
     std::string title,
-    std::string originalText,
-    std::string replacementText,
-    std::uint64_t expectedDocumentVersion) {
+    std::string original_text,
+    std::string replacement_text,
+    std::uint64_t expected_document_version) {
     WorkspaceEdit edit;
     edit.operations.push_back({
         .kind = WorkspaceEditOperationKind::ReplaceFile,
         .file = std::move(file),
-        .originalText = std::move(originalText),
-        .replacementText = std::move(replacementText),
-        .textEdits = {},
-        .expectedDocumentVersion = expectedDocumentVersion,
+        .original_text = std::move(original_text),
+        .replacement_text = std::move(replacement_text),
+        .text_edits = {},
+        .expected_document_version = expected_document_version,
     });
-    return create(std::move(source), std::move(title), std::move(edit));
+    return Create(std::move(source), std::move(title), std::move(edit));
 }
 
-ChangeSet ChangeSetService::createFileCreation(
+ChangeSet ChangeSetService::CreateFileCreation(
     VirtualFile file,
     std::string source,
     std::string title,
@@ -141,72 +141,72 @@ ChangeSet ChangeSetService::createFileCreation(
     edit.operations.push_back({
         .kind = WorkspaceEditOperationKind::CreateFile,
         .file = std::move(file),
-        .replacementText = std::move(text),
+        .replacement_text = std::move(text),
     });
-    return create(std::move(source), std::move(title), std::move(edit));
+    return Create(std::move(source), std::move(title), std::move(edit));
 }
 
-ChangeSet ChangeSetService::createFileDeletion(
+ChangeSet ChangeSetService::CreateFileDeletion(
     VirtualFile file,
     std::string source,
     std::string title,
-    std::string originalText) {
+    std::string original_text) {
     WorkspaceEdit edit;
     edit.operations.push_back({
         .kind = WorkspaceEditOperationKind::DeleteFile,
         .file = std::move(file),
-        .originalText = std::move(originalText),
+        .original_text = std::move(original_text),
     });
-    return create(std::move(source), std::move(title), std::move(edit));
+    return Create(std::move(source), std::move(title), std::move(edit));
 }
 
-ChangeSet ChangeSetService::createFileRename(
+ChangeSet ChangeSetService::CreateFileRename(
     VirtualFile file,
-    VirtualFile targetFile,
+    VirtualFile target_file,
     std::string source,
     std::string title) {
     WorkspaceEdit edit;
     edit.operations.push_back({
         .kind = WorkspaceEditOperationKind::RenameFile,
         .file = std::move(file),
-        .targetFile = std::move(targetFile),
+        .target_file = std::move(target_file),
     });
-    return create(std::move(source), std::move(title), std::move(edit));
+    return Create(std::move(source), std::move(title), std::move(edit));
 }
 
-std::optional<ChangeSet> ChangeSetService::changeSet(const std::string& id) const {
-    auto it = changeSets_.find(id);
-    return it == changeSets_.end() ? std::nullopt : std::optional<ChangeSet>(it->second);
+std::optional<ChangeSet> ChangeSetService::Get(const std::string& id) const {
+    auto it = change_sets_.find(id);
+    return it == change_sets_.end() ? std::nullopt : std::optional<ChangeSet>(it->second);
 }
 
-std::vector<ChangeSet> ChangeSetService::changeSets() const {
+std::vector<ChangeSet> ChangeSetService::List() const {
     std::vector<ChangeSet> result;
-    for (const auto& [id, changeSet] : changeSets_) {
+    for (const auto& [id, change_set] : change_sets_) {
         (void)id;
-        result.push_back(changeSet);
+        result.push_back(change_set);
     }
     return result;
 }
 
-WorkspaceEditPreflight ChangeSetService::preflight(
+WorkspaceEditPreflight ChangeSetService::Preflight(
     Workspace& workspace,
     DocumentService& documents,
     const std::string& id) const {
     (void)workspace;
-    const auto found = changeSet(id);
+    const auto found = Get(id);
     if (!found) {
-        return conflict(WorkspaceEditOperationKind::ReplaceFile, {}, "Change set was not found");
+        return Conflict(WorkspaceEditOperationKind::ReplaceFile, {}, "Change set was not found");
     }
 
     WorkspaceEditPreflight result;
     for (const WorkspaceEditOperation& operation : found->edit.operations) {
-        appendConflicts(result, preflightOperation(documents, operation));
+        AppendConflicts(result, PreflightOperation(documents, operation));
     }
     return result;
 }
 
-ChangeSetResult ChangeSetService::approve(const std::string& id) {
-    ChangeSet* found = mutableChangeSet(id);
+ChangeSetResult ChangeSetService::Approve(const std::string& id) {
+    ChangeSet* found = MutableChangeSet(id);
     if (found == nullptr) {
         return {false, "Change set was not found"};
     }
@@ -214,8 +214,8 @@ ChangeSetResult ChangeSetService::approve(const std::string& id) {
     return {true, "Change set approved"};
 }
 
-ChangeSetResult ChangeSetService::reject(const std::string& id) {
-    ChangeSet* found = mutableChangeSet(id);
+ChangeSetResult ChangeSetService::Reject(const std::string& id) {
+    ChangeSet* found = MutableChangeSet(id);
     if (found == nullptr) {
         return {false, "Change set was not found"};
     }
@@ -223,13 +223,13 @@ ChangeSetResult ChangeSetService::reject(const std::string& id) {
     return {true, "Change set rejected"};
 }
 
-ChangeSetResult ChangeSetService::applyApproved(
+ChangeSetResult ChangeSetService::ApplyApproved(
     Workspace& workspace,
     DocumentService& documents,
     const std::string& id,
     ChangeSetApplyOptions options) {
     (void)workspace;
-    ChangeSet* found = mutableChangeSet(id);
+    ChangeSet* found = MutableChangeSet(id);
     if (found == nullptr) {
         return {false, "Change set was not found"};
     }
@@ -238,196 +238,290 @@ ChangeSetResult ChangeSetService::applyApproved(
     }
 
     if (options.preflight) {
-        const WorkspaceEditPreflight preflightResult = preflight(workspace, documents, id);
-        if (!preflightResult.ok) {
-            return {false, preflightMessage(preflightResult)};
+        const WorkspaceEditPreflight preflight_result = Preflight(workspace, documents, id);
+        if (!preflight_result.ok) {
+            return {false, PreflightMessage(preflight_result)};
         }
     }
 
+    WorkspaceEdit inverse_edit = CreateInverseEdit(documents, found->edit);
     for (const WorkspaceEditOperation& operation : found->edit.operations) {
-        ChangeSetResult result = applyOperation(documents, operation, options);
+        ChangeSetResult result = ApplyOperation(documents, operation, options);
         if (!result.ok) {
             return result;
         }
     }
 
+    found->inverse_edit = std::move(inverse_edit);
+    found->undo_token = found->id + ".undo";
     found->status = ChangeSetStatus::Applied;
     return {true, "Change set applied"};
 }
 
-ChangeSet* ChangeSetService::mutableChangeSet(const std::string& id) {
-    auto it = changeSets_.find(id);
-    return it == changeSets_.end() ? nullptr : &it->second;
+ChangeSetResult ChangeSetService::UndoApplied(
+    Workspace& workspace,
+    DocumentService& documents,
+    const std::string& id,
+    ChangeSetApplyOptions options) {
+    (void)workspace;
+    ChangeSet* found = MutableChangeSet(id);
+    if (found == nullptr) {
+        return {false, "Change set was not found"};
+    }
+    if (found->status != ChangeSetStatus::Applied) {
+        return {false, "Change set has not been applied"};
+    }
+    if (found->inverse_edit.operations.empty()) {
+        return {false, "Change set has no undo edit"};
+    }
+
+    if (options.preflight) {
+        WorkspaceEditPreflight result;
+        for (const WorkspaceEditOperation& operation : found->inverse_edit.operations) {
+            AppendConflicts(result, PreflightOperation(documents, operation));
+        }
+        if (!result.ok) {
+            return {false, PreflightMessage(result)};
+        }
+    }
+
+    for (const WorkspaceEditOperation& operation : found->inverse_edit.operations) {
+        ChangeSetResult result = ApplyOperation(documents, operation, options);
+        if (!result.ok) {
+            return result;
+        }
+    }
+
+    found->status = ChangeSetStatus::Undone;
+    return {true, "Change set undone"};
 }
 
-WorkspaceEditPreflight ChangeSetService::preflightOperation(
+ChangeSet* ChangeSetService::MutableChangeSet(const std::string& id) {
+    auto it = change_sets_.find(id);
+    return it == change_sets_.end() ? nullptr : &it->second;
+}
+
+WorkspaceEdit ChangeSetService::CreateInverseEdit(DocumentService& documents, const WorkspaceEdit& edit) const {
+    WorkspaceEdit inverse;
+    for (auto it = edit.operations.rbegin(); it != edit.operations.rend(); ++it) {
+        const WorkspaceEditOperation& operation = *it;
+        if (operation.kind == WorkspaceEditOperationKind::CreateFile) {
+            inverse.operations.push_back({
+                .kind = WorkspaceEditOperationKind::DeleteFile,
+                .file = operation.file,
+                .original_text = operation.replacement_text,
+            });
+            continue;
+        }
+        if (operation.kind == WorkspaceEditOperationKind::DeleteFile) {
+            inverse.operations.push_back({
+                .kind = WorkspaceEditOperationKind::CreateFile,
+                .file = operation.file,
+                .replacement_text = operation.original_text,
+            });
+            continue;
+        }
+        if (operation.kind == WorkspaceEditOperationKind::RenameFile) {
+            inverse.operations.push_back({
+                .kind = WorkspaceEditOperationKind::RenameFile,
+                .file = operation.target_file,
+                .target_file = operation.file,
+            });
+            continue;
+        }
+        if (operation.kind == WorkspaceEditOperationKind::EditText) {
+            auto snapshot = documents.ReadSnapshot(operation.file);
+            std::string before = snapshot ? snapshot->text : "";
+            std::string after = before;
+            for (auto edit_it = operation.text_edits.rbegin(); edit_it != operation.text_edits.rend(); ++edit_it) {
+                after = ApplyTextEdit(after, *edit_it);
+            }
+            inverse.operations.push_back({
+                .kind = WorkspaceEditOperationKind::ReplaceFile,
+                .file = operation.file,
+                .original_text = std::move(after),
+                .replacement_text = std::move(before),
+            });
+            continue;
+        }
+        inverse.operations.push_back({
+            .kind = WorkspaceEditOperationKind::ReplaceFile,
+            .file = operation.file,
+            .original_text = operation.replacement_text,
+            .replacement_text = operation.original_text,
+        });
+    }
+    return inverse;
+}
+
+WorkspaceEditPreflight ChangeSetService::PreflightOperation(
     DocumentService& documents,
     const WorkspaceEditOperation& operation) const {
     if (operation.kind == WorkspaceEditOperationKind::CreateFile) {
-        if (operation.file.exists()) {
-            return conflict(operation.kind, operation.file, "Target file already exists");
+        if (operation.file.Exists()) {
+            return Conflict(operation.kind, operation.file, "Target file already exists");
         }
         return {};
     }
 
     if (operation.kind == WorkspaceEditOperationKind::DeleteFile) {
-        if (TextDocument* document = documents.document(operation.file)) {
-            if (document->text != operation.originalText) {
-                return conflict(operation.kind, operation.file, "Document text changed after the change set was created");
+        if (TextDocument* document = documents.Document(operation.file)) {
+            if (document->text != operation.original_text) {
+                return Conflict(operation.kind, operation.file, "Document text changed after the change set was created");
             }
             return {};
         }
-        auto text = operation.file.readText();
+        auto text = operation.file.ReadText();
         if (!text) {
-            return conflict(operation.kind, operation.file, "Target file is not readable");
+            return Conflict(operation.kind, operation.file, "Target file is not readable");
         }
-        if (*text != operation.originalText) {
-            return conflict(operation.kind, operation.file, "Target file changed after the change set was created");
+        if (*text != operation.original_text) {
+            return Conflict(operation.kind, operation.file, "Target file changed after the change set was created");
         }
         return {};
     }
 
     if (operation.kind == WorkspaceEditOperationKind::RenameFile) {
-        if (!operation.file.exists()) {
-            return conflict(operation.kind, operation.file, "Rename source does not exist", operation.targetFile);
+        if (!operation.file.Exists()) {
+            return Conflict(operation.kind, operation.file, "Rename source does not exist", operation.target_file);
         }
-        if (operation.targetFile.exists()) {
-            return conflict(operation.kind, operation.file, "Rename target already exists", operation.targetFile);
+        if (operation.target_file.Exists()) {
+            return Conflict(operation.kind, operation.file, "Rename target already exists", operation.target_file);
         }
         return {};
     }
 
     if (operation.kind == WorkspaceEditOperationKind::EditText) {
-        const TextDocument* document = documents.document(operation.file);
+        const TextDocument* document = documents.Document(operation.file);
         if (document == nullptr) {
-            auto text = operation.file.readText();
+            auto text = operation.file.ReadText();
             if (!text) {
-                return conflict(operation.kind, operation.file, "Document is not readable");
+                return Conflict(operation.kind, operation.file, "Document is not readable");
             }
             return {};
         }
-        if (operation.expectedDocumentVersion != 0 && document->version != operation.expectedDocumentVersion) {
-            return conflict(operation.kind, operation.file, "Document version changed after the change set was created");
+        if (operation.expected_document_version != 0 && document->version != operation.expected_document_version) {
+            return Conflict(operation.kind, operation.file, "Document version changed after the change set was created");
         }
         return {};
     }
 
-    if (TextDocument* document = documents.document(operation.file)) {
-        if (operation.expectedDocumentVersion != 0 && document->version != operation.expectedDocumentVersion) {
-            return conflict(operation.kind, operation.file, "Document version changed after the change set was created");
+    if (TextDocument* document = documents.Document(operation.file)) {
+        if (operation.expected_document_version != 0 && document->version != operation.expected_document_version) {
+            return Conflict(operation.kind, operation.file, "Document version changed after the change set was created");
         }
-        if (document->text != operation.originalText) {
-            return conflict(operation.kind, operation.file, "Document text changed after the change set was created");
+        if (document->text != operation.original_text) {
+            return Conflict(operation.kind, operation.file, "Document text changed after the change set was created");
         }
     } else {
-        auto text = operation.file.readText();
+        auto text = operation.file.ReadText();
         if (!text) {
-            return conflict(operation.kind, operation.file, "Target file is not readable");
+            return Conflict(operation.kind, operation.file, "Target file is not readable");
         }
-        if (*text != operation.originalText) {
-            return conflict(operation.kind, operation.file, "Target file changed after the change set was created");
+        if (*text != operation.original_text) {
+            return Conflict(operation.kind, operation.file, "Target file changed after the change set was created");
         }
     }
     return {};
 }
 
-ChangeSetResult ChangeSetService::applyOperation(
+ChangeSetResult ChangeSetService::ApplyOperation(
     DocumentService& documents,
     const WorkspaceEditOperation& operation,
     ChangeSetApplyOptions options) const {
     if (operation.kind == WorkspaceEditOperationKind::CreateFile) {
-        if (operation.file.exists()) {
+        if (operation.file.Exists()) {
             return {false, "Target file already exists"};
         }
         std::string error;
-        if (!operation.file.writeText(operation.replacementText, &error)) {
+        if (!operation.file.WriteText(operation.replacement_text, &error)) {
             return {false, error};
         }
         return {true, "File created"};
     }
 
     if (operation.kind == WorkspaceEditOperationKind::DeleteFile) {
-        if (TextDocument* document = documents.document(operation.file)) {
-            if (document->text != operation.originalText) {
+        if (TextDocument* document = documents.Document(operation.file)) {
+            if (document->text != operation.original_text) {
                 return {false, "Document text changed after the change set was created"};
             }
         } else {
-            auto text = operation.file.readText();
-            if (!text || *text != operation.originalText) {
+            auto text = operation.file.ReadText();
+            if (!text || *text != operation.original_text) {
                 return {false, "Target file changed after the change set was created"};
             }
         }
-        ChangeSetResult result = removeLocalFile(operation.file);
+        ChangeSetResult result = RemoveLocalFile(operation.file);
         if (result.ok) {
-            documents.closeDocument(operation.file);
+            documents.CloseDocument(operation.file);
         }
         return result;
     }
 
     if (operation.kind == WorkspaceEditOperationKind::RenameFile) {
-        if (!operation.file.exists()) {
+        if (!operation.file.Exists()) {
             return {false, "Rename source does not exist"};
         }
-        if (operation.targetFile.exists()) {
+        if (operation.target_file.Exists()) {
             return {false, "Rename target already exists"};
         }
-        ChangeSetResult result = renameLocalFile(operation.file, operation.targetFile);
+        ChangeSetResult result = RenameLocalFile(operation.file, operation.target_file);
         if (result.ok) {
-            documents.closeDocument(operation.file);
+            documents.CloseDocument(operation.file);
         }
         return result;
     }
 
     if (operation.kind == WorkspaceEditOperationKind::EditText) {
-        TextDocument* document = documents.document(operation.file);
+        TextDocument* document = documents.Document(operation.file);
         if (document == nullptr) {
             std::string error;
-            document = documents.openDocument(operation.file, &error);
+            document = documents.OpenDocument(operation.file, &error);
             if (document == nullptr) {
                 return {false, error};
             }
         }
-        if (operation.expectedDocumentVersion != 0 && document->version != operation.expectedDocumentVersion) {
+        if (operation.expected_document_version != 0 && document->version != operation.expected_document_version) {
             return {false, "Document version changed after the change set was created"};
         }
         std::string error;
-        if (!documents.applyEdits(operation.file, operation.textEdits, document->version, &error)) {
+        if (!documents.ApplyEdits(operation.file, operation.text_edits, document->version, &error)) {
             return {false, error};
         }
-        if (options.saveAfterApply && !documents.saveDocument(operation.file, &error)) {
+        if (options.save_after_apply && !documents.SaveDocument(operation.file, &error)) {
             return {false, error};
         }
         return {true, "Text edits applied"};
     }
 
-    if (TextDocument* document = documents.document(operation.file)) {
-        if (operation.expectedDocumentVersion != 0 && document->version != operation.expectedDocumentVersion) {
+    if (TextDocument* document = documents.Document(operation.file)) {
+        if (operation.expected_document_version != 0 && document->version != operation.expected_document_version) {
             return {false, "Document version changed after the change set was created"};
         }
-        if (document->text != operation.originalText) {
+        if (document->text != operation.original_text) {
             return {false, "Document text changed after the change set was created"};
         }
         std::string error;
-        if (!documents.setText(operation.file, operation.replacementText, document->version, &error)) {
+        if (!documents.SetText(operation.file, operation.replacement_text, document->version, &error)) {
             return {false, error};
         }
-        if (options.saveAfterApply && !documents.saveDocument(operation.file, &error)) {
+        if (options.save_after_apply && !documents.SaveDocument(operation.file, &error)) {
             return {false, error};
         }
     } else {
-        auto text = operation.file.readText();
-        if (!text || *text != operation.originalText) {
+        auto text = operation.file.ReadText();
+        if (!text || *text != operation.original_text) {
             return {false, "Target file changed after the change set was created"};
         }
         std::string error;
-        if (!operation.file.writeText(operation.replacementText, &error)) {
+        if (!operation.file.WriteText(operation.replacement_text, &error)) {
             return {false, error};
         }
     }
     return {true, "File replacement applied"};
 }
 
-std::string toString(WorkspaceEditOperationKind kind) {
+std::string ToString(WorkspaceEditOperationKind kind) {
     switch (kind) {
     case WorkspaceEditOperationKind::ReplaceFile:
         return "replaceFile";
@@ -443,7 +537,7 @@ std::string toString(WorkspaceEditOperationKind kind) {
     return "replaceFile";
 }
 
-std::string toString(ChangeSetStatus status) {
+std::string ToString(ChangeSetStatus status) {
     switch (status) {
     case ChangeSetStatus::Pending:
         return "pending";
@@ -453,27 +547,29 @@ std::string toString(ChangeSetStatus status) {
         return "rejected";
     case ChangeSetStatus::Applied:
         return "applied";
+    case ChangeSetStatus::Undone:
+        return "undone";
     }
     return "pending";
 }
 
-std::string createUnifiedDiff(
+std::string CreateUnifiedDiff(
     const VirtualFile& file,
-    const std::string& originalText,
-    const std::string& replacementText) {
+    const std::string& original_text,
+    const std::string& replacement_text) {
     std::ostringstream diff;
-    diff << "--- a/" << file.toUri().string() << '\n';
-    diff << "+++ b/" << file.toUri().string() << '\n';
+    diff << "--- a/" << file.ToUri().ToString() << '\n';
+    diff << "+++ b/" << file.ToUri().ToString() << '\n';
     diff << "@@ -1,";
-    diff << splitLines(originalText).size();
+    diff << SplitLines(original_text).size();
     diff << " +1,";
-    diff << splitLines(replacementText).size();
+    diff << SplitLines(replacement_text).size();
     diff << " @@\n";
 
-    for (const std::string& line : splitLines(originalText)) {
+    for (const std::string& line : SplitLines(original_text)) {
         diff << '-' << line << '\n';
     }
-    for (const std::string& line : splitLines(replacementText)) {
+    for (const std::string& line : SplitLines(replacement_text)) {
         diff << '+' << line << '\n';
     }
     return diff.str();

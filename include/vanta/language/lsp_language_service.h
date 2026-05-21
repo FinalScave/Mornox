@@ -9,25 +9,25 @@ namespace vanta {
 
 class LspLanguageService final : public LanguageService {
 public:
-    LspLanguageService(std::filesystem::path serverPath, std::filesystem::path workspaceRoot);
+    LspLanguageService(std::filesystem::path server_path, std::filesystem::path workspace_root);
 
-    bool start(std::string* errorMessage = nullptr) override;
-    bool running() const override;
-    void stop() override;
+    bool Start(std::string* error_message = nullptr) override;
+    bool Running() const override;
+    void Stop() override;
 
-    void didOpen(const TextDocument& document) override;
-    void didChange(const TextDocument& document) override;
-    void didSave(const TextDocument& document) override;
-    void didClose(const VirtualFile& file) override;
+    void DidOpen(const TextDocument& document) override;
+    void DidChange(const TextDocument& document) override;
+    void DidSave(const TextDocument& document) override;
+    void DidClose(const VirtualFile& file) override;
 
-    CompletionList completion(const TextDocumentPosition& request) override;
-    HoverResult hover(const TextDocumentPosition& request) override;
-    LocationResult definition(const TextDocumentPosition& request) override;
-    SemanticTokens semanticTokensFull(const TextDocumentIdentifier& document) override;
+    CompletionList Completion(const TextDocumentPosition& request) override;
+    HoverResult Hover(const TextDocumentPosition& request) override;
+    LocationResult Definition(const TextDocumentPosition& request) override;
+    SemanticTokens SemanticTokensFull(const TextDocumentIdentifier& document) override;
 
 private:
-    std::filesystem::path serverPath_;
-    std::filesystem::path workspaceRoot_;
+    std::filesystem::path server_path_;
+    std::filesystem::path workspace_root_;
     LspClient client_;
 };
 

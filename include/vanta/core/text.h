@@ -17,10 +17,10 @@ struct TextRange {
 
 struct TextEdit {
     TextRange range;
-    std::string replacementText;
+    std::string replacement_text;
 };
 
-std::size_t offsetForPosition(const std::string& text, TextPosition position);
-std::string applyTextEdit(const std::string& text, const TextEdit& edit);
+std::size_t OffsetForPosition(const std::string& text, TextPosition position);
+std::string ApplyTextEdit(const std::string& text, const TextEdit& edit);
 
 }

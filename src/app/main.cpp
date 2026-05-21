@@ -8,39 +8,51 @@
 #include <vector>
 
 #include "vanta/agent/agent_tool_registry.h"
+#include "vanta/agent/agent_context.h"
+#include "cpp_index.h"
 #include "vanta/execution/problem_matcher.h"
 #include "vanta/execution/build_service.h"
-#include "vanta/builtin/cmake/cmake_project_model.h"
-#include "vanta/workspace/editor.h"
+#include "vanta/execution/run_configuration.h"
+#include "cmake_project_model.h"
+#include "core/value_projection.h"
+#include "vanta/platform/async.h"
+#include "vanta/plugin/core_plugin.h"
 #include "vanta/workspace/workspace.h"
-#include "vanta/builtin/git/git_client.h"
-#include "vanta/workspace/ide_application.h"
-#include "vanta/workspace/ide_environment.h"
+#include "vanta/workspace/workspace_context.h"
 #include "vanta/workspace/workspace_runtime.h"
 #include "vanta/language/lsp_client.h"
+#include "vanta/core/json_codec.h"
 #include "vanta/plugin/plugin_manager.h"
+#include "vanta/project/project.h"
+#include "vanta/project/project_manager.h"
+#include "vanta/vfs/virtual_file_system.h"
 
 namespace {
 
 struct AppState {
-    vanta::IdeApplication app;
-    std::vector<vanta::Diagnostic> lastDiagnostics;
-    std::vector<std::string> changeSetIds;
+    vanta::AsyncRuntime async;
+    vanta::VirtualFileSystem vfs;
+    std::unique_ptr<vanta::WorkspaceRuntime> runtime;
+    vanta::ConsoleLogger logger;
+    vanta::PluginManager plugins;
+    vanta::CorePluginRegistry core_plugins;
+    std::vector<vanta::Diagnostic> last_diagnostics;
+    std::vector<std::string> change_set_ids;
 };
 
-vanta::WorkspaceRuntime& ide(AppState& state) {
-    return state.app.runtime();
+vanta::WorkspaceContext& Ide(AppState& state) {
+    return state.runtime->Context();
 }
 
-vanta::PluginManager& plugins(AppState& state) {
-    return state.app.plugins();
+vanta::PluginManager& Plugins(AppState& state) {
+    return state.plugins;
 }
 
-vanta::LayoutStateStore& layout(AppState& state) {
-    return *ide(state).project().getComponent<vanta::LayoutStateStore>(vanta::LayoutStateStore::componentId);
+vanta::ProjectRunConfigurations* ProjectRuns(AppState& state) {
+    return Ide(state).RequireProject().GetComponent<vanta::ProjectRunConfigurations>(vanta::ProjectRunConfigurations::kComponentId);
 }
 
-std::vector<std::string> splitCommand(const std::string& line) {
+std::vector<std::string> SplitCommand(const std::string& line) {
     std::istringstream stream(line);
     std::vector<std::string> parts;
     std::string part;
@@ -50,29 +62,25 @@ std::vector<std::string> splitCommand(const std::string& line) {
     return parts;
 }
 
-std::filesystem::path argumentPath(const std::vector<std::string>& args, std::size_t index, const std::filesystem::path& fallback) {
+std::filesystem::path ArgumentPath(const std::vector<std::string>& args, std::size_t index, const std::filesystem::path& fallback) {
     if (args.size() <= index) {
         return fallback;
     }
     return args[index];
 }
 
-void printHelp() {
+void PrintHelp() {
     std::cout
         << "Commands:\n"
         << "  help\n"
         << "  tree\n"
-        << "  tabs\n"
         << "  open <file>\n"
         << "  plugins\n"
         << "  plugins.reload [id]\n"
         << "  plugins.unload <id>\n"
         << "  contributions\n"
         << "  project.graph\n"
-        << "  ui.state\n"
-        << "  layout.state\n"
         << "  components\n"
-        << "  palette [query]\n"
         << "  search.files <query>\n"
         << "  search.text <query>\n"
         << "  commands\n"
@@ -86,8 +94,8 @@ void printHelp() {
         << "  agent.read <file>\n"
         << "  agent.context [file]\n"
         << "  agent.propose <file> <replacement-file>\n"
-        << "  agent.run <file> <replacement-file>\n"
-        << "  agent.approve <index>\n"
+        << "  agent.operation <file> <replacement-file>\n"
+        << "  agent.Approve <index>\n"
         << "  agent.apply <index>\n"
         << "  lsp.start\n"
         << "  lsp.completion <file> <line> <character>\n"
@@ -95,483 +103,498 @@ void printHelp() {
         << "  quit\n";
 }
 
-vanta::Json contributionToJson(const vanta::Contribution& contribution) {
-    return vanta::Json::object({
-        {"kind", vanta::Json(vanta::toString(contribution.kind))},
-        {"id", vanta::Json(contribution.id)},
-        {"title", vanta::Json(contribution.title)},
-        {"pluginId", vanta::Json(contribution.pluginId)},
+vanta::Value ContributionProjection(const vanta::PluginRegistration& contribution) {
+    return vanta::Value::ObjectValue({
+        {"kind", vanta::Value(vanta::ToString(contribution.kind))},
+        {"id", vanta::Value(contribution.id)},
+        {"title", vanta::Value(contribution.title)},
+        {"pluginId", vanta::Value(contribution.plugin_id)},
+        {"metadataOnly", vanta::Value(contribution.metadata_only)},
     });
 }
 
-vanta::Json searchHitsToJson(const std::vector<vanta::SearchHit>& hits) {
-    vanta::Json::Array values;
-    for (const vanta::SearchHit& hit : hits) {
-        values.push_back(vanta::Json::object({
-            {"file", vanta::Json(hit.file.toUri().string())},
-            {"line", vanta::Json(static_cast<std::int64_t>(hit.line))},
-            {"column", vanta::Json(static_cast<std::int64_t>(hit.column))},
-            {"preview", vanta::Json(hit.preview)},
-            {"score", vanta::Json(static_cast<std::int64_t>(hit.score))},
+vanta::Value IndexHitsProjection(const std::vector<vanta::IndexHit>& hits) {
+    vanta::Value::Array values;
+    for (const vanta::IndexHit& hit : hits) {
+        values.push_back(vanta::Value::ObjectValue({
+            {"file", vanta::Value(hit.file.ToUri().ToString())},
+            {"line", vanta::Value(static_cast<std::int64_t>(hit.range.start.line + 1))},
+            {"column", vanta::Value(static_cast<std::int64_t>(hit.range.start.character + 1))},
+            {"title", vanta::Value(hit.title)},
+            {"preview", vanta::Value(hit.preview)},
+            {"providerId", vanta::Value(hit.provider_id)},
+            {"score", vanta::Value(static_cast<std::int64_t>(hit.score))},
         }));
     }
-    return vanta::Json::array(std::move(values));
+    return vanta::Value::ArrayValue(std::move(values));
 }
 
-vanta::Json paletteItemsToJson(const std::vector<vanta::CommandPaletteItem>& items) {
-    vanta::Json::Array values;
-    for (const vanta::CommandPaletteItem& item : items) {
-        values.push_back(vanta::Json::object({
-            {"id", vanta::Json(item.id)},
-            {"title", vanta::Json(item.title)},
-            {"keybinding", vanta::Json(item.keybinding)},
-            {"source", vanta::Json(item.source)},
-            {"enabled", vanta::Json(item.enabled)},
-        }));
-    }
-    return vanta::Json::array(std::move(values));
-}
-
-vanta::Json runConfigurationsToJson(const std::vector<vanta::RunConfiguration>& configurations) {
-    vanta::Json::Array values;
+vanta::Value RunConfigurationsProjection(const std::vector<vanta::RunConfiguration>& configurations) {
+    vanta::Value::Array values;
     for (const vanta::RunConfiguration& configuration : configurations) {
-        values.push_back(vanta::toJson(configuration));
+        values.push_back(vanta::internal::RunConfigurationProjection(configuration));
     }
-    return vanta::Json::array(std::move(values));
+    return vanta::Value::ArrayValue(std::move(values));
 }
 
-vanta::Json executionTargetsToJson(const std::vector<vanta::ExecutionTarget>& targets) {
-    vanta::Json::Array values;
+vanta::Value ExecutionTargetsProjection(const std::vector<vanta::ExecutionTarget>& targets) {
+    vanta::Value::Array values;
     for (const vanta::ExecutionTarget& target : targets) {
-        values.push_back(vanta::toJson(target));
+        values.push_back(vanta::internal::ExecutionTargetProjection(target));
     }
-    return vanta::Json::array(std::move(values));
+    return vanta::Value::ArrayValue(std::move(values));
 }
 
-vanta::Json stringsToJson(const std::vector<std::string>& values) {
-    vanta::Json::Array result;
+vanta::Value StringsProjection(const std::vector<std::string>& values) {
+    vanta::Value::Array result;
     for (const std::string& value : values) {
-        result.push_back(vanta::Json(value));
+        result.push_back(vanta::Value(value));
     }
-    return vanta::Json::array(std::move(result));
+    return vanta::Value::ArrayValue(std::move(result));
 }
 
-vanta::Json layoutStateToJsonSummary(const vanta::LayoutState& layout) {
-    vanta::Json::Array tabs;
-    for (const vanta::Uri& uri : layout.openTabs) {
-        tabs.push_back(vanta::Json(uri.string()));
-    }
-    return vanta::Json::object({
-        {"openTabs", vanta::Json::array(std::move(tabs))},
-        {"activeFile", vanta::Json(layout.activeFile.string())},
-        {"fileTreeVisible", vanta::Json(layout.fileTreeVisible)},
-        {"problemsVisible", vanta::Json(layout.problemsVisible)},
-        {"buildPanelVisible", vanta::Json(layout.buildPanelVisible)},
-        {"agentPanelVisible", vanta::Json(layout.agentPanelVisible)},
-        {"gitPanelVisible", vanta::Json(layout.gitPanelVisible)},
-        {"lastBuildTarget", vanta::Json(layout.lastBuildTarget)},
-    });
+std::string ProjectViewIndent(std::size_t depth) {
+    return std::string(depth * 2, ' ');
 }
 
-vanta::LanguageRequestKind languageKindFromCommand(const std::string& command) {
+void RenderProjectViewNode(
+    vanta::WorkspaceContext& context,
+    const std::string& view_id,
+    const vanta::ProjectViewNode& node,
+    std::ostringstream& stream,
+    std::size_t depth,
+    std::size_t max_depth) {
+    const bool folder_like = node.has_children || node.kind == std::string(vanta::ProjectViewNodeKind::kDirectory);
+    stream << ProjectViewIndent(depth) << (folder_like ? "[D] " : "[F] ") << node.label << '\n';
+    if (!node.has_children || depth >= max_depth) {
+        return;
+    }
+    for (const vanta::ProjectViewNode& child : context.Projects().Children(context, view_id, node)) {
+        RenderProjectViewNode(context, view_id, child, stream, depth + 1, max_depth);
+    }
+}
+
+std::string RenderProjectView(vanta::WorkspaceContext& context, const std::string& view_id, std::size_t max_depth = 4) {
+    std::ostringstream stream;
+    for (const vanta::ProjectViewNode& node : context.Projects().TopLevelNodes(context, view_id)) {
+        RenderProjectViewNode(context, view_id, node, stream, 0, max_depth);
+    }
+    return stream.str();
+}
+
+vanta::CodeIntelligenceKind CodeIntelligenceKindFromCommand(const std::string& command) {
     if (command == "lsp.hover") {
-        return vanta::LanguageRequestKind::Hover;
+        return vanta::CodeIntelligenceKind::Hover;
     }
-    return vanta::LanguageRequestKind::Completion;
+    return vanta::CodeIntelligenceKind::Completion;
 }
 
-std::filesystem::path activeBuildDirectory(AppState& state) {
-    const auto* cmake = ide(state).project().model().attachment<vanta::CMakeProjectModel>(vanta::CMakeProjectModel::attachmentId);
-    if (cmake != nullptr && !cmake->buildDirectory.empty()) {
-        return cmake->buildDirectory;
+std::filesystem::path ActiveBuildDirectory(AppState& state) {
+    const auto* cmake = Ide(state).RequireProject().Model().Attachment<vanta::CMakeProjectModel>(vanta::CMakeProjectModel::kAttachmentId);
+    if (cmake != nullptr && !cmake->build_directory.empty()) {
+        return cmake->build_directory;
     }
-    return ide(state).workspace().info().rootPath / "build";
+    return Ide(state).CurrentWorkspace().Info().root_path / "build";
 }
 
-void registerBuiltInCommands(AppState& state) {
-    ide(state).keybindings().bind({.commandId = "editor.open", .key = "Cmd+O", .when = "workspaceOpen"});
-    ide(state).keybindings().bind({.commandId = "command.palette", .key = "Cmd+Shift+P", .when = "workspaceOpen"});
-    ide(state).keybindings().bind({.commandId = "cmake.build", .key = "Cmd+B", .when = "project == cmake"});
+void ShutdownCli(AppState& state) {
+    if (state.runtime != nullptr) {
+        state.runtime->Close();
+    }
+    state.plugins.DeactivateAll();
+    state.runtime.reset();
+    state.async.Stop();
+}
 
-    ide(state).commands().add("workspace.tree", [&](const vanta::Json&) {
-        return vanta::Json(vanta::renderFileTree(ide(state).workspace().fileTree()));
+bool OpenCliWorkspace(
+    AppState& state,
+    const std::filesystem::path& workspace_path,
+    vanta::CorePluginDependencies dependencies,
+    std::string* error_message) {
+    ShutdownCli(state);
+    state.async.Start();
+
+    state.runtime = std::make_unique<vanta::WorkspaceRuntime>(state.vfs, state.async);
+    if (!state.runtime->Open(workspace_path, error_message, false)) {
+        state.runtime.reset();
+        state.async.Stop();
+        return false;
+    }
+
+    vanta::WorkspaceContext& context = state.runtime->Context();
+    state.plugins.Scan(context.CurrentWorkspace().Info().root_path / "plugins");
+    state.core_plugins = vanta::CreateDefaultCorePluginRegistry(std::move(dependencies));
+    context.AgentContext().RegisterProvider(vanta::CreateGitDiffAgentContextProvider(context.Git()));
+    for (const std::string& message : state.plugins.ActivateCorePlugins(state.core_plugins, state.logger, context)) {
+        state.logger.Info(message);
+    }
+    for (const std::string& message : state.plugins.ActivateExternalPlugins(state.logger, context)) {
+        state.logger.Info(message);
+    }
+    state.runtime->InitializeWorkspace();
+    state.runtime->StartDocumentSync();
+    return true;
+}
+
+std::vector<std::string> ReloadCliPlugins(AppState& state) {
+    std::vector<std::string> messages = state.plugins.ReloadCorePlugins(state.core_plugins, state.logger, Ide(state));
+    std::vector<std::string> external_messages = state.plugins.ActivateExternalPlugins(state.logger, Ide(state));
+    messages.insert(messages.end(), external_messages.begin(), external_messages.end());
+    Ide(state).RefreshProject();
+    return messages;
+}
+
+std::vector<std::string> ReloadCliPlugin(AppState& state, const std::string& plugin_id) {
+    std::vector<std::string> messages = state.plugins.ReloadPlugin(plugin_id, state.logger, Ide(state));
+    Ide(state).RefreshProject();
+    return messages;
+}
+
+bool UnloadCliPlugin(AppState& state, const std::string& plugin_id, std::string* message) {
+    const bool ok = state.plugins.UnloadPlugin(plugin_id, message);
+    Ide(state).RefreshProject();
+    return ok;
+}
+
+void RegisterBuiltInCommands(AppState& state) {
+    Ide(state).Commands().RegisterCommand("workspace.tree", [&](const vanta::Value&) {
+        return vanta::Value(RenderProjectView(Ide(state), "vanta.files"));
     });
 
-    ide(state).commands().add("editor.open", [&](const vanta::Json& input) {
-        const std::string file = input.stringValue("file").value_or("");
-        const vanta::VirtualFile virtualFile = ide(state).workspace().file(file);
-        ide(state).documents().openDocument(virtualFile);
-        vanta::EditorTab& tab = ide(state).editor().openFile(virtualFile);
-        ide(state).ui().refresh();
-        return vanta::Json::object({
-            {"id", vanta::Json(static_cast<std::int64_t>(tab.id))},
-            {"title", vanta::Json(tab.title)},
-            {"placeholderEditor", vanta::Json(tab.placeholderEditor)},
+    Ide(state).Commands().RegisterCommand("editor.open", [&](const vanta::Value& input) {
+        const std::string file = input.StringValue("file").value_or("");
+        const vanta::VirtualFile virtual_file = Ide(state).CurrentWorkspace().File(file);
+        std::string error;
+        vanta::TextDocument* document = Ide(state).Documents().OpenDocument(virtual_file, &error);
+        return vanta::Value::ObjectValue({
+            {"ok", vanta::Value(document != nullptr)},
+            {"uri", vanta::Value(virtual_file.ToUri().ToString())},
+            {"version", vanta::Value(static_cast<std::int64_t>(document == nullptr ? 0 : document->version))},
+            {"error", vanta::Value(error)},
         });
     });
 
-    ide(state).commands().add("contributions.list", [&](const vanta::Json&) {
-        vanta::Json::Array values;
-        for (const vanta::Contribution& contribution : ide(state).contributions().list()) {
-            values.push_back(contributionToJson(contribution));
+    Ide(state).Commands().RegisterCommand("contributions.list", [&](const vanta::Value&) {
+        vanta::Value::Array values;
+        for (const vanta::PluginRegistration& contribution : Ide(state).Contributions()) {
+            values.push_back(ContributionProjection(contribution));
         }
-        return vanta::Json::array(std::move(values));
+        return vanta::Value::ArrayValue(std::move(values));
     });
 
-    ide(state).commands().add("plugins.reload", [&](const vanta::Json&) {
-        return stringsToJson(state.app.reloadPlugins());
+    Ide(state).Commands().RegisterCommand("plugins.reload", [&](const vanta::Value&) {
+        return StringsProjection(ReloadCliPlugins(state));
     });
 
-    ide(state).commands().add("plugin.reload", [&](const vanta::Json& input) {
-        const std::string pluginId = input.stringValue("id").value_or("");
-        return stringsToJson(state.app.reloadPlugin(pluginId));
+    Ide(state).Commands().RegisterCommand("plugin.reload", [&](const vanta::Value& input) {
+        const std::string plugin_id = input.StringValue("id").value_or("");
+        return StringsProjection(ReloadCliPlugin(state, plugin_id));
     });
 
-    ide(state).commands().add("plugin.unload", [&](const vanta::Json& input) {
-        const std::string pluginId = input.stringValue("id").value_or("");
+    Ide(state).Commands().RegisterCommand("plugin.unload", [&](const vanta::Value& input) {
+        const std::string plugin_id = input.StringValue("id").value_or("");
         std::string message;
-        const bool ok = state.app.unloadPlugin(pluginId, &message);
-        return vanta::Json::object({
-            {"ok", vanta::Json(ok)},
-            {"message", vanta::Json(message)},
+        const bool ok = UnloadCliPlugin(state, plugin_id, &message);
+        return vanta::Value::ObjectValue({
+            {"ok", vanta::Value(ok)},
+            {"message", vanta::Value(message)},
         });
     });
 
-    ide(state).commands().add("project.graph", [&](const vanta::Json&) {
-        const auto* cmake = ide(state).project().model().attachment<vanta::CMakeProjectModel>(vanta::CMakeProjectModel::attachmentId);
-        return cmake == nullptr ? vanta::Json::object() : vanta::toJson(cmake->graph);
+    Ide(state).Commands().RegisterCommand("project.graph", [&](const vanta::Value&) {
+        const auto* cmake = Ide(state).RequireProject().Model().Attachment<vanta::CMakeProjectModel>(vanta::CMakeProjectModel::kAttachmentId);
+        return cmake == nullptr ? vanta::Value::ObjectValue() : vanta::internal::CMakeProjectGraphProjection(cmake->graph);
     });
 
-    ide(state).commands().add("ui.state", [&](const vanta::Json&) {
-        const vanta::UiState& ui = ide(state).ui().state();
-        return vanta::Json::object({
-            {"workspaceOpen", vanta::Json(ui.workspaceOpen)},
-            {"workspace", vanta::Json(ui.workspace.rootPath.string())},
-            {"project", vanta::Json(vanta::primaryProjectType(ui.project))},
-            {"tabs", vanta::Json(static_cast<std::int64_t>(ui.tabs.size()))},
-            {"problems", vanta::Json(static_cast<std::int64_t>(ui.problems.size()))},
-            {"jobs", vanta::Json(static_cast<std::int64_t>(ui.jobs.size()))},
-            {"contributions", vanta::Json(static_cast<std::int64_t>(ui.contributions.size()))},
-            {"version", vanta::Json(static_cast<std::int64_t>(ui.version))},
-        });
+    Ide(state).Commands().RegisterCommand("search.files", [&](const vanta::Value& input) {
+        const std::string query = input.StringValue("query").value_or("");
+        return IndexHitsProjection(Ide(state).Indexes().Query(Ide(state), {
+            .kind = vanta::IndexQueryKind::Files,
+            .query = query,
+        }).hits);
     });
 
-    ide(state).commands().add("layout.state", [&](const vanta::Json&) {
-        layout(state).capture(ide(state).ui().state());
-        return layoutStateToJsonSummary(layout(state).state());
+    Ide(state).Commands().RegisterCommand("search.text", [&](const vanta::Value& input) {
+        const std::string query = input.StringValue("query").value_or("");
+        return IndexHitsProjection(Ide(state).Indexes().Query(Ide(state), {
+            .kind = vanta::IndexQueryKind::Text,
+            .query = query,
+        }).hits);
     });
 
-    ide(state).commands().add("search.files", [&](const vanta::Json& input) {
-        const std::string query = input.stringValue("query").value_or("");
-        return searchHitsToJson(ide(state).search().searchFiles(query));
-    });
-
-    ide(state).commands().add("search.text", [&](const vanta::Json& input) {
-        const std::string query = input.stringValue("query").value_or("");
-        return searchHitsToJson(ide(state).search().searchText(query));
-    });
-
-    ide(state).commands().add("command.palette", [&](const vanta::Json& input) {
-        const std::string query = input.stringValue("query").value_or("");
-        auto items = ide(state).commandPalette().items(ide(state).commands(), ide(state).contributions(), ide(state).keybindings());
-        return paletteItemsToJson(ide(state).commandPalette().filter(items, query));
-    });
-
-    ide(state).commands().add("run.configurations", [&](const vanta::Json& input) {
-        std::vector<vanta::RunConfiguration> configurations = ide(state).runConfigurations().configurations(true);
-        vanta::VirtualFile focusFile;
-        if (auto file = input.stringValue("file")) {
-            focusFile = ide(state).workspace().file(*file);
+    Ide(state).Commands().RegisterCommand("run.configurations", [&](const vanta::Value& input) {
+        vanta::ProjectRunConfigurations* project_configurations = ProjectRuns(state);
+        std::vector<vanta::RunConfiguration> configurations =
+            project_configurations == nullptr ? std::vector<vanta::RunConfiguration>() : project_configurations->Configurations(true);
+        vanta::VirtualFile focus_file;
+        if (auto file = input.StringValue("file")) {
+            focus_file = Ide(state).CurrentWorkspace().File(*file);
         }
-        std::vector<vanta::RunConfiguration> produced = ide(state).runConfigurations().produce(ide(state).context(), focusFile);
+        std::vector<vanta::RunConfiguration> produced = Ide(state).RunConfigurations().Produce(Ide(state), focus_file);
         configurations.insert(configurations.end(), produced.begin(), produced.end());
-        return runConfigurationsToJson(configurations);
+        return RunConfigurationsProjection(configurations);
     });
 
-    ide(state).commands().add("run.targets", [&](const vanta::Json&) {
-        return executionTargetsToJson(ide(state).execution().targets(ide(state).context()));
+    Ide(state).Commands().RegisterCommand("run.targets", [&](const vanta::Value&) {
+        return ExecutionTargetsProjection(Ide(state).Execution().Targets(Ide(state)));
     });
 
-    ide(state).agent().addTool({
-        .id = "vanta.readFile",
+    Ide(state).AgentTools().RegisterTool({
+        .id = "vanta.ReadFile",
         .description = "Read a text file from the current workspace.",
-        .inputSchema = vanta::Json::object({
-            {"type", vanta::Json("object")},
-            {"required", vanta::Json::array({vanta::Json("file")})},
+        .input_schema = vanta::Value::ObjectValue({
+            {"type", vanta::Value("object")},
+            {"required", vanta::Value::ArrayValue({vanta::Value("file")})},
         }),
-        .handler = [&](const vanta::Json& input) {
-            const std::string file = input.stringValue("file").value_or("");
-            const vanta::VirtualFile virtualFile = ide(state).workspace().file(file);
-            const auto snapshot = ide(state).documents().readSnapshot(virtualFile);
-            return vanta::Json::object({
-                {"ok", vanta::Json(snapshot.has_value())},
-                {"uri", vanta::Json(virtualFile.toUri().string())},
-                {"open", vanta::Json(snapshot ? snapshot->open : false)},
-                {"dirty", vanta::Json(snapshot ? snapshot->dirty : false)},
-                {"version", vanta::Json(static_cast<std::int64_t>(snapshot ? snapshot->version : 0))},
-                {"text", vanta::Json(snapshot ? snapshot->text : "")},
+        .handler = [&](const vanta::Value& input) {
+            const std::string file = input.StringValue("file").value_or("");
+            const vanta::VirtualFile virtual_file = Ide(state).CurrentWorkspace().File(file);
+            const auto snapshot = Ide(state).Documents().ReadSnapshot(virtual_file);
+            return vanta::Value::ObjectValue({
+                {"ok", vanta::Value(snapshot.has_value())},
+                {"uri", vanta::Value(virtual_file.ToUri().ToString())},
+                {"open", vanta::Value(snapshot ? snapshot->open : false)},
+                {"dirty", vanta::Value(snapshot ? snapshot->dirty : false)},
+                {"version", vanta::Value(static_cast<std::int64_t>(snapshot ? snapshot->version : 0))},
+                {"text", vanta::Value(snapshot ? snapshot->text : "")},
             });
         },
     });
 
-    ide(state).commands().add("agent.context", [&](const vanta::Json& input) {
+    Ide(state).Commands().RegisterCommand("agent.context", [&](const vanta::Value& input) {
         vanta::AgentContextRequest request;
-        request.goal = input.stringValue("goal").value_or("");
-        if (auto file = input.stringValue("file")) {
-            request.focusFile = ide(state).workspace().file(*file);
+        request.goal = input.StringValue("goal").value_or("");
+        if (auto file = input.StringValue("file")) {
+            request.focus_file = Ide(state).CurrentWorkspace().File(*file);
         }
-        return vanta::toJson(ide(state).agentContext().collect(request, ide(state).context()));
+        return vanta::internal::AgentContextProjection(Ide(state).AgentContext().Collect(request, Ide(state)));
     });
 }
 
-void printStartupSummary(AppState& state) {
-    const vanta::ProjectModel& project = ide(state).project().model();
-    const auto* cmake = project.attachment<vanta::CMakeProjectModel>(vanta::CMakeProjectModel::attachmentId);
-    const auto* cpp = project.attachment<vanta::CppCompilationDatabase>(vanta::CppCompilationDatabase::attachmentId);
-    std::cout << "Vanta workspace: " << ide(state).workspace().info().rootPath.string() << '\n';
-    std::cout << "Project: " << vanta::primaryProjectType(project) << '\n';
-    std::cout << "CMakeLists.txt: " << (cmake != nullptr && cmake->cmakeListsFile.valid() ? "yes" : "no") << '\n';
-    std::cout << "compile_commands.json: " << (cpp != nullptr && cpp->file.valid() ? cpp->file.toUri().string() : "no") << '\n';
-    std::cout << "project graph: " << (cmake == nullptr ? 0 : cmake->graph.sourceFiles.size()) << " source files, "
-              << (cmake == nullptr ? 0 : cmake->graph.includeDirectories.size()) << " include dirs\n";
-    std::cout << "plugins: " << plugins(state).manifests().size() << '\n';
-    std::cout << "active core plugins: " << plugins(state).activePluginIds().size() << '\n';
-    std::cout << "editor: placeholder panels enabled\n";
+void PrintStartupSummary(AppState& state) {
+    const vanta::ProjectModel& project = Ide(state).RequireProject().Model();
+    const auto* cmake = project.Attachment<vanta::CMakeProjectModel>(vanta::CMakeProjectModel::kAttachmentId);
+    const auto* cpp = project.Attachment<vanta::CppCompilationDatabase>(vanta::CppCompilationDatabase::kAttachmentId);
+    std::cout << "Vanta workspace: " << Ide(state).CurrentWorkspace().Info().root_path.string() << '\n';
+    std::cout << "Project: " << vanta::PrimaryProjectType(project) << '\n';
+    std::cout << "CMakeLists.txt: " << (cmake != nullptr && cmake->cmake_lists_file.Valid() ? "yes" : "no") << '\n';
+    std::cout << "compile_commands.json: " << (cpp != nullptr && cpp->file.Valid() ? cpp->file.ToUri().ToString() : "no") << '\n';
+    std::cout << "project graph: " << (cmake == nullptr ? 0 : cmake->graph.source_files.size()) << " source files, "
+              << (cmake == nullptr ? 0 : cmake->graph.include_directories.size()) << " include dirs\n";
+    std::cout << "plugins: " << Plugins(state).Manifests().size() << '\n';
+    std::cout << "active core plugins: " << Plugins(state).ActivePluginIds().size() << '\n';
 }
 
-void printTabs(const vanta::EditorWorkspace& editor) {
-    if (editor.tabs().empty()) {
-        std::cout << "No open tabs\n";
-        return;
-    }
-    for (const vanta::EditorTab& tab : editor.tabs()) {
-        std::cout << (tab.active ? "* " : "  ") << tab.id << " " << tab.title;
-        if (tab.placeholderEditor) {
-            std::cout << " [placeholder]";
-        }
-        std::cout << '\n';
-    }
-}
-
-void runBuildCommand(AppState& state, const std::vector<std::string>& args, vanta::BuildTaskKind kind) {
-    vanta::BuildTask task;
-    task.kind = kind;
-    task.buildDirectory = activeBuildDirectory(state);
+void RunBuildCommand(AppState& state, const std::vector<std::string>& args, vanta::BuildRequestKind kind) {
+    vanta::BuildRequest request;
+    request.kind = kind;
+    request.build_directory_override = ActiveBuildDirectory(state);
     if (args.size() > 1) {
-        task.target = args[1];
-        layout(state).rememberBuildTarget(args[1]);
+        request.target_id = args[1];
     }
 
-    const vanta::JobKind jobKind = kind == vanta::BuildTaskKind::Build ? vanta::JobKind::Build : vanta::JobKind::Test;
-    task.jobId = ide(state).jobs().start(jobKind, vanta::toString(kind));
-    vanta::BuildResult result = ide(state).context().run(ide(state).workspace().info().rootPath, task);
-    ide(state).refreshProject();
-    state.lastDiagnostics = result.diagnostics;
-    ide(state).diagnostics().publish("build", result.diagnostics);
-    ide(state).ui().refresh();
+    const vanta::JobKind job_kind = kind == vanta::BuildRequestKind::Build ? vanta::JobKind::Build : vanta::JobKind::Test;
+    request.job_id = Ide(state).Jobs().Start(job_kind, vanta::ToString(kind));
+    vanta::BuildResult result = Ide(state).Build().Run(Ide(state), request);
+    Ide(state).RefreshProject();
+    state.last_diagnostics = result.diagnostics;
+    Ide(state).Diagnostics().Publish("build", result.diagnostics);
     std::cout << result.output;
-    std::cout << "\nexit: " << result.exitCode << ", diagnostics: " << result.diagnostics.size() << '\n';
+    std::cout << "\nexit: " << result.exit_code << ", diagnostics: " << result.diagnostics.size() << '\n';
     for (std::size_t i = 0; i < result.diagnostics.size(); ++i) {
         const vanta::Diagnostic& diagnostic = result.diagnostics[i];
-        std::cout << i << ": " << diagnostic.location.file.toUri().string() << ':' << diagnostic.location.line << ':'
-                  << diagnostic.location.column << " " << vanta::toString(diagnostic.severity) << " "
+        std::cout << i << ": " << diagnostic.location.file.ToUri().ToString() << ':' << diagnostic.location.line << ':'
+                  << diagnostic.location.column << " " << vanta::ToString(diagnostic.severity) << " "
                   << diagnostic.message << '\n';
-        ide(state).editor().openDiagnostic(diagnostic);
     }
 }
 
-void printRunResult(AppState& state, const vanta::RunResult& result) {
+void PrintRunResult(AppState& state, const vanta::RunResult& result) {
     if (!result.output.empty()) {
         std::cout << result.output;
     }
-    std::cout << "\nexit: " << result.exitCode << ", diagnostics: " << result.diagnostics.size() << '\n';
+    std::cout << "\nexit: " << result.exit_code << ", diagnostics: " << result.diagnostics.size() << '\n';
     if (!result.diagnostics.empty()) {
-        state.lastDiagnostics = result.diagnostics;
-        ide(state).diagnostics().publish("run", result.diagnostics);
+        state.last_diagnostics = result.diagnostics;
+        Ide(state).Diagnostics().Publish("run", result.diagnostics);
         for (std::size_t i = 0; i < result.diagnostics.size(); ++i) {
             const vanta::Diagnostic& diagnostic = result.diagnostics[i];
-            std::cout << i << ": " << diagnostic.location.file.toUri().string() << ':' << diagnostic.location.line << ':'
-                      << diagnostic.location.column << " " << vanta::toString(diagnostic.severity) << " "
+            std::cout << i << ": " << diagnostic.location.file.ToUri().ToString() << ':' << diagnostic.location.line << ':'
+                      << diagnostic.location.column << " " << vanta::ToString(diagnostic.severity) << " "
                       << diagnostic.message << '\n';
-            ide(state).editor().openDiagnostic(diagnostic);
         }
     }
-    ide(state).ui().refresh();
 }
 
-void runConfiguration(AppState& state, const std::string& configurationId, const std::string& targetId = {}) {
-    const vanta::RunResult result = ide(state).runConfigurations().run(ide(state).context(), configurationId, targetId);
-    printRunResult(state, result);
+void RunConfigurationCommand(AppState& state, const std::string& configuration_id, const std::string& target_id = {}) {
+    const vanta::RunResult result = Ide(state).RunConfigurations().Run(Ide(state), configuration_id, target_id);
+    PrintRunResult(state, result);
 }
 
-void runFileCommand(AppState& state, const std::vector<std::string>& args) {
+void RunFileCommand(AppState& state, const std::vector<std::string>& args) {
     if (args.size() < 2) {
         std::cout << "Usage: run.file <file>\n";
         return;
     }
-    const vanta::VirtualFile file = ide(state).workspace().file(args[1]);
-    std::vector<vanta::RunConfiguration> configurations = ide(state).runConfigurations().produce(ide(state).context(), file);
+    const vanta::VirtualFile file = Ide(state).CurrentWorkspace().File(args[1]);
+    std::vector<vanta::RunConfiguration> configurations = Ide(state).RunConfigurations().Produce(Ide(state), file);
     if (configurations.empty()) {
-        std::cout << "No run configuration producer matched " << file.toUri().string() << '\n';
+        std::cout << "No run configuration producer matched " << file.ToUri().ToString() << '\n';
         return;
     }
     vanta::RunConfiguration configuration = std::move(configurations.front());
     const std::string id = configuration.id;
-    ide(state).runConfigurations().addConfiguration(std::move(configuration));
-    runConfiguration(state, id);
+    if (vanta::ProjectRunConfigurations* project_configurations = ProjectRuns(state)) {
+        project_configurations->AddConfiguration(std::move(configuration));
+    }
+    RunConfigurationCommand(state, id);
 }
 
-void handleAgentPropose(AppState& state, const std::vector<std::string>& args) {
+void HandleAgentPropose(AppState& state, const std::vector<std::string>& args) {
     if (args.size() < 3) {
         std::cout << "Usage: agent.propose <file> <replacement-file>\n";
         return;
     }
 
-    const vanta::VirtualFile originalFile = ide(state).workspace().file(args[1]);
-    const vanta::VirtualFile replacementFile = ide(state).workspace().file(args[2]);
-    auto original = originalFile.readText();
-    auto replacement = replacementFile.readText();
+    const vanta::VirtualFile original_file = Ide(state).CurrentWorkspace().File(args[1]);
+    const vanta::VirtualFile replacement_file = Ide(state).CurrentWorkspace().File(args[2]);
+    auto original = original_file.ReadText();
+    auto replacement = replacement_file.ReadText();
     if (!original || !replacement) {
         std::cout << "Could not read proposal input files\n";
         return;
     }
 
-    vanta::ChangeSet changeSet = ide(state).changes().createFileReplacement(originalFile, "agent", "Agent change set", *original, *replacement);
-    state.changeSetIds.push_back(changeSet.id);
-    ide(state).publish({
+    vanta::ChangeSet change_set = Ide(state).Changes().CreateFileReplacement(original_file, "agent", "Agent change set", *original, *replacement);
+    state.change_set_ids.push_back(change_set.id);
+    Ide(state).Publish({
         .kind = vanta::IdeEventKind::ChangeSetProposed,
-        .file = originalFile,
-        .message = changeSet.title,
+        .file = original_file,
+        .message = change_set.title,
     });
-    std::cout << "change set " << (state.changeSetIds.size() - 1) << " (" << changeSet.id << ")\n";
-    std::cout << changeSet.unifiedDiff;
+    std::cout << "change set " << (state.change_set_ids.size() - 1) << " (" << change_set.id << ")\n";
+    std::cout << change_set.unified_diff;
 }
 
-void handleAgentRun(AppState& state, const std::vector<std::string>& args) {
+void HandleAgentOperation(AppState& state, const std::vector<std::string>& args) {
     if (args.size() < 3) {
-        std::cout << "Usage: agent.run <file> <replacement-file>\n";
+        std::cout << "Usage: agent.operation <file> <replacement-file>\n";
         return;
     }
 
-    const vanta::VirtualFile originalFile = ide(state).workspace().file(args[1]);
-    const vanta::VirtualFile replacementFile = ide(state).workspace().file(args[2]);
-    auto replacement = replacementFile.readText();
+    const vanta::VirtualFile original_file = Ide(state).CurrentWorkspace().File(args[1]);
+    const vanta::VirtualFile replacement_file = Ide(state).CurrentWorkspace().File(args[2]);
+    auto replacement = replacement_file.ReadText();
     if (!replacement) {
         std::cout << "Could not read replacement file\n";
         return;
     }
 
-    vanta::AgentRunRequest request;
-    request.goal = "Agent edit";
-    request.focusFile = originalFile;
-    request.targetFile = originalFile;
-    request.replacementText = *replacement;
-    const vanta::AgentRun run = ide(state).agentOperations().startRun(ide(state).context(), std::move(request));
-    if (!run.changeSetId.empty()) {
-        state.changeSetIds.push_back(run.changeSetId);
+    const auto snapshot = Ide(state).Documents().ReadSnapshot(original_file);
+    vanta::AgentOperationRequest request;
+    request.kind = vanta::AgentOperationKind::ProposeFileReplacement;
+    request.file = original_file;
+    request.source = "agent";
+    request.title = "Agent edit";
+    request.replacement_text = *replacement;
+    request.expected_document_version = snapshot ? snapshot->version : 0;
+    const vanta::AgentOperationResult result = Ide(state).AgentOperations().Execute(Ide(state), std::move(request));
+    if (!result.change_set_id.empty()) {
+        state.change_set_ids.push_back(result.change_set_id);
     }
-    std::cout << vanta::toJson(run).dump() << '\n';
+    std::cout << vanta::ValueToJsonText(vanta::internal::AgentOperationResultProjection(result)) << '\n';
 }
 
-void handleCommand(AppState& state, const std::vector<std::string>& args) {
+void HandleCommand(AppState& state, const std::vector<std::string>& args) {
     if (args.empty()) {
         return;
     }
 
     const std::string& command = args[0];
     if (command == "help") {
-        printHelp();
+        PrintHelp();
     } else if (command == "tree") {
-        std::cout << vanta::renderFileTree(ide(state).workspace().fileTree());
-    } else if (command == "tabs") {
-        printTabs(ide(state).editor());
+        std::cout << RenderProjectView(Ide(state), "vanta.files");
     } else if (command == "open") {
-        const auto file = argumentPath(args, 1, {});
+        const auto file = ArgumentPath(args, 1, {});
         if (file.empty()) {
             std::cout << "Usage: open <file>\n";
             return;
         }
-        const vanta::VirtualFile virtualFile = ide(state).workspace().file(file);
-        ide(state).documents().openDocument(virtualFile);
-        const vanta::EditorTab& tab = ide(state).editor().openFile(virtualFile);
-        ide(state).ui().refresh();
-        std::cout << "opened tab " << tab.id << " for " << tab.file.toUri().string() << '\n';
+        const vanta::VirtualFile virtual_file = Ide(state).CurrentWorkspace().File(file);
+        std::string error;
+        vanta::TextDocument* document = Ide(state).Documents().OpenDocument(virtual_file, &error);
+        if (document == nullptr) {
+            std::cout << "open failed: " << error << '\n';
+        } else {
+            std::cout << "opened " << virtual_file.ToUri().ToString() << " version " << document->version << '\n';
+        }
     } else if (command == "plugins") {
-        const auto activePlugins = plugins(state).activePluginIds();
-        for (const vanta::PluginManifest& manifest : plugins(state).manifests()) {
-            const bool active = std::find(activePlugins.begin(), activePlugins.end(), manifest.extension.id) != activePlugins.end();
+        const auto active_plugins = Plugins(state).ActivePluginIds();
+        for (const vanta::PluginManifest& manifest : Plugins(state).Manifests()) {
+            const bool active = std::find(active_plugins.begin(), active_plugins.end(), manifest.extension.id) != active_plugins.end();
             std::cout << manifest.extension.id << " " << manifest.extension.version << " at "
                       << manifest.extension.location.string() << (active ? " [active]" : "") << '\n';
         }
     } else if (command == "plugins.reload") {
         auto result = args.size() > 1
-            ? ide(state).commands().execute("plugin.reload", vanta::Json::object({{"id", vanta::Json(args[1])}}))
-            : ide(state).commands().execute("plugins.reload", vanta::Json::object());
-        std::cout << (result ? result->dump() : "plugin reload is not available") << '\n';
+            ? Ide(state).Commands().Execute("plugin.reload", vanta::Value::ObjectValue({{"id", vanta::Value(args[1])}}))
+            : Ide(state).Commands().Execute("plugins.reload", vanta::Value::ObjectValue());
+        std::cout << (result ? vanta::ValueToJsonText(*result) : "plugin reload is not available") << '\n';
     } else if (command == "plugins.unload") {
         if (args.size() < 2) {
             std::cout << "Usage: plugins.unload <id>\n";
             return;
         }
-        auto result = ide(state).commands().execute("plugin.unload", vanta::Json::object({{"id", vanta::Json(args[1])}}));
-        std::cout << (result ? result->dump() : "plugin unload is not available") << '\n';
+        auto result = Ide(state).Commands().Execute("plugin.unload", vanta::Value::ObjectValue({{"id", vanta::Value(args[1])}}));
+        std::cout << (result ? vanta::ValueToJsonText(*result) : "plugin unload is not available") << '\n';
     } else if (command == "contributions") {
-        auto result = ide(state).commands().execute("contributions.list", vanta::Json::object());
-        std::cout << (result ? result->dump() : "contribution registry is not available") << '\n';
+        auto result = Ide(state).Commands().Execute("contributions.list", vanta::Value::ObjectValue());
+        std::cout << (result ? vanta::ValueToJsonText(*result) : "contribution registry is not available") << '\n';
     } else if (command == "project.graph") {
-        auto result = ide(state).commands().execute("project.graph", vanta::Json::object());
-        std::cout << (result ? result->dump() : "project graph is not available") << '\n';
-    } else if (command == "ui.state") {
-        auto result = ide(state).commands().execute("ui.state", vanta::Json::object());
-        std::cout << (result ? result->dump() : "ui state is not available") << '\n';
-    } else if (command == "layout.state") {
-        auto result = ide(state).commands().execute("layout.state", vanta::Json::object());
-        std::cout << (result ? result->dump() : "layout state is not available") << '\n';
+        auto result = Ide(state).Commands().Execute("project.graph", vanta::Value::ObjectValue());
+        std::cout << (result ? vanta::ValueToJsonText(*result) : "project graph is not available") << '\n';
     } else if (command == "components") {
-        for (const std::string& id : ide(state).project().components().ids()) {
+        for (const std::string& id : Ide(state).RequireProject().Components().Ids()) {
             std::cout << id << '\n';
         }
-    } else if (command == "palette") {
-        const std::string query = args.size() > 1 ? args[1] : "";
-        auto result = ide(state).commands().execute("command.palette", vanta::Json::object({{"query", vanta::Json(query)}}));
-        std::cout << (result ? result->dump() : "command palette is not available") << '\n';
     } else if (command == "search.files" || command == "search.text") {
         if (args.size() < 2) {
             std::cout << "Usage: " << command << " <query>\n";
             return;
         }
-        auto result = ide(state).commands().execute(command, vanta::Json::object({{"query", vanta::Json(args[1])}}));
-        std::cout << (result ? result->dump() : "search is not available") << '\n';
+        auto result = Ide(state).Commands().Execute(command, vanta::Value::ObjectValue({{"query", vanta::Value(args[1])}}));
+        std::cout << (result ? vanta::ValueToJsonText(*result) : "search is not available") << '\n';
     } else if (command == "commands") {
-        for (const std::string& id : ide(state).commands().list()) {
+        for (const std::string& id : Ide(state).Commands().List()) {
             std::cout << id << '\n';
         }
     } else if (command == "build") {
-        runBuildCommand(state, args, vanta::BuildTaskKind::Build);
+        RunBuildCommand(state, args, vanta::BuildRequestKind::Build);
     } else if (command == "test") {
-        runBuildCommand(state, args, vanta::BuildTaskKind::Test);
+        RunBuildCommand(state, args, vanta::BuildRequestKind::Test);
     } else if (command == "run.configs") {
-        vanta::Json input = vanta::Json::object();
+        vanta::Value input = vanta::Value::ObjectValue();
         if (args.size() > 1) {
-            input = vanta::Json::object({{"file", vanta::Json(args[1])}});
+            input = vanta::Value::ObjectValue({{"file", vanta::Value(args[1])}});
         }
-        auto result = ide(state).commands().execute("run.configurations", input);
-        std::cout << (result ? result->dump() : "run configurations are not available") << '\n';
+        auto result = Ide(state).Commands().Execute("run.configurations", input);
+        std::cout << (result ? vanta::ValueToJsonText(*result) : "run configurations are not available") << '\n';
     } else if (command == "run.targets") {
-        auto result = ide(state).commands().execute("run.targets", vanta::Json::object());
-        std::cout << (result ? result->dump() : "run targets are not available") << '\n';
+        auto result = Ide(state).Commands().Execute("run.targets", vanta::Value::ObjectValue());
+        std::cout << (result ? vanta::ValueToJsonText(*result) : "run targets are not available") << '\n';
     } else if (command == "run.file") {
-        runFileCommand(state, args);
+        RunFileCommand(state, args);
     } else if (command == "run") {
         if (args.size() < 2) {
             std::cout << "Usage: run <config-id> [target-id]\n";
             return;
         }
-        runConfiguration(state, args[1], args.size() > 2 ? args[2] : "");
+        RunConfigurationCommand(state, args[1], args.size() > 2 ? args[2] : "");
     } else if (command == "git.diff") {
-        auto result = ide(state).commands().execute("git.diff", vanta::Json::object());
-        if (result && result->contains("text")) {
-            std::cout << (*result)["text"].asString();
+        auto result = Ide(state).Commands().Execute("git.diff", vanta::Value::ObjectValue());
+        if (result && result->Contains("text")) {
+            std::cout << (*result)["text"].AsString();
         } else {
             std::cout << "git.diff command is not available\n";
         }
@@ -580,27 +603,27 @@ void handleCommand(AppState& state, const std::vector<std::string>& args) {
             std::cout << "Usage: agent.read <file>\n";
             return;
         }
-        auto result = ide(state).agent().callTool("vanta.readFile", vanta::Json::object({{"file", vanta::Json(args[1])}}));
-        std::cout << (result ? result->dump() : "tool not found") << '\n';
+        auto result = Ide(state).AgentTools().CallTool("vanta.ReadFile", vanta::Value::ObjectValue({{"file", vanta::Value(args[1])}}));
+        std::cout << (result ? vanta::ValueToJsonText(*result) : "tool not found") << '\n';
     } else if (command == "agent.context") {
-        vanta::Json input = vanta::Json::object();
+        vanta::Value input = vanta::Value::ObjectValue();
         if (args.size() > 1) {
-            input = vanta::Json::object({{"file", vanta::Json(args[1])}});
+            input = vanta::Value::ObjectValue({{"file", vanta::Value(args[1])}});
         }
-        auto result = ide(state).commands().execute("agent.context", input);
-        std::cout << (result ? result->dump() : "agent context is not available") << '\n';
+        auto result = Ide(state).Commands().Execute("agent.context", input);
+        std::cout << (result ? vanta::ValueToJsonText(*result) : "agent context is not available") << '\n';
     } else if (command == "agent.propose") {
-        handleAgentPropose(state, args);
-    } else if (command == "agent.run") {
-        handleAgentRun(state, args);
-    } else if (command == "agent.approve") {
+        HandleAgentPropose(state, args);
+    } else if (command == "agent.operation") {
+        HandleAgentOperation(state, args);
+    } else if (command == "agent.Approve") {
         if (args.size() < 2) {
-            std::cout << "Usage: agent.approve <index>\n";
+            std::cout << "Usage: agent.Approve <index>\n";
             return;
         }
         const auto index = static_cast<std::size_t>(std::stoul(args[1]));
-        if (index < state.changeSetIds.size()) {
-            const auto result = ide(state).changes().approve(state.changeSetIds[index]);
+        if (index < state.change_set_ids.size()) {
+            const auto result = Ide(state).Changes().Approve(state.change_set_ids[index]);
             std::cout << "approved change set " << index << '\n';
             if (!result.ok) {
                 std::cout << result.message << '\n';
@@ -612,22 +635,21 @@ void handleCommand(AppState& state, const std::vector<std::string>& args) {
             return;
         }
         const auto index = static_cast<std::size_t>(std::stoul(args[1]));
-        if (index < state.changeSetIds.size()) {
-            const auto result = ide(state).changes().applyApproved(ide(state).workspace(), ide(state).documents(), state.changeSetIds[index], {.saveAfterApply = true});
-            ide(state).publish({
+        if (index < state.change_set_ids.size()) {
+            const auto result = Ide(state).Changes().ApplyApproved(Ide(state).CurrentWorkspace(), Ide(state).Documents(), state.change_set_ids[index], {.save_after_apply = true});
+            Ide(state).Publish({
                 .kind = vanta::IdeEventKind::ChangeSetApplied,
-                .message = state.changeSetIds[index],
+                .message = state.change_set_ids[index],
             });
-            ide(state).ui().refresh();
             std::cout << result.message << '\n';
         }
     } else if (command == "lsp.start") {
-        auto result = ide(state).commands().execute("clice.start", vanta::Json::object());
-        const bool ok = result && result->contains("ok") && (*result)["ok"].asBool();
+        auto result = Ide(state).Commands().Execute("clice.start", vanta::Value::ObjectValue());
+        const bool ok = result && result->Contains("ok") && (*result)["ok"].AsBool();
         if (ok) {
             std::cout << "clice started\n";
         } else {
-            const std::string error = result && result->contains("error") ? (*result)["error"].asString() : "command is not available";
+            const std::string error = result && result->Contains("error") ? (*result)["error"].AsString() : "command is not available";
             std::cout << "clice start failed: " << error << '\n';
         }
     } else if (command == "lsp.completion" || command == "lsp.hover") {
@@ -635,24 +657,24 @@ void handleCommand(AppState& state, const std::vector<std::string>& args) {
             std::cout << "Usage: " << command << " <file> <line> <character>\n";
             return;
         }
-        const vanta::VirtualFile file = ide(state).workspace().file(args[1]);
+        const vanta::VirtualFile file = Ide(state).CurrentWorkspace().File(args[1]);
         std::string error;
-        vanta::TextDocument* document = ide(state).documents().document(file);
+        vanta::TextDocument* document = Ide(state).Documents().Document(file);
         if (document == nullptr) {
-            document = ide(state).documents().openDocument(file, &error);
+            document = Ide(state).Documents().OpenDocument(file, &error);
         }
 
-        vanta::LanguageRequest request;
-        request.kind = languageKindFromCommand(command);
+        vanta::CodeIntelligenceRequest request;
+        request.kind = CodeIntelligenceKindFromCommand(command);
         request.document.file = file;
-        request.document.languageId = "cpp";
-        request.documentVersion = document == nullptr ? 0 : document->version;
+        request.document.language_id = "cpp";
+        request.document_version = document == nullptr ? 0 : document->version;
         request.position = {
             .line = std::stoi(args[2]),
             .character = std::stoi(args[3]),
         };
-        const auto result = ide(state).languageRequests().execute(request, ide(state).documents(), ide(state).languages());
-        std::cout << vanta::languagePipelineResultToJson(result).dump() << '\n';
+        const auto result = Ide(state).CodeIntelligence().Query(Ide(state), request);
+        std::cout << vanta::ValueToJsonText(vanta::internal::CodeIntelligenceResultProjection(result)) << '\n';
     } else {
         std::cout << "Unknown command: " << command << '\n';
     }
@@ -661,42 +683,46 @@ void handleCommand(AppState& state, const std::vector<std::string>& args) {
 }
 
 int main(int argc, char** argv) {
-    std::filesystem::path workspacePath = std::filesystem::current_path();
-    std::filesystem::path clicePath;
+    std::filesystem::path workspace_path = std::filesystem::current_path();
+    std::filesystem::path clice_path;
 
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
         if (arg == "--workspace" && i + 1 < argc) {
-            workspacePath = argv[++i];
+            workspace_path = argv[++i];
         } else if (arg == "--clice" && i + 1 < argc) {
-            clicePath = argv[++i];
+            clice_path = argv[++i];
         } else if (arg == "--help") {
-            printHelp();
+            PrintHelp();
             return 0;
         }
     }
 
     AppState state;
+    vanta::CorePluginDependencies core_plugin_dependencies;
+    if (!clice_path.empty()) {
+        core_plugin_dependencies.clice.server_path = clice_path;
+    }
     std::string error;
-    if (!state.app.openWorkspace(workspacePath, clicePath, &error)) {
+    if (!OpenCliWorkspace(state, workspace_path, std::move(core_plugin_dependencies), &error)) {
         std::cerr << error << '\n';
         return 1;
     }
 
-    registerBuiltInCommands(state);
+    RegisterBuiltInCommands(state);
 
-    printStartupSummary(state);
-    printHelp();
+    PrintStartupSummary(state);
+    PrintHelp();
 
     std::string line;
-    while (state.app.services().async.drainMain(), std::cout << "vanta> " && std::getline(std::cin, line)) {
-        const auto args = splitCommand(line);
+    while (Ide(state).Async().DrainMain(), std::cout << "vanta> " && std::getline(std::cin, line)) {
+        const auto args = SplitCommand(line);
         if (!args.empty() && (args[0] == "quit" || args[0] == "exit")) {
             break;
         }
-        handleCommand(state, args);
+        HandleCommand(state, args);
     }
 
-    state.app.shutdown();
+    ShutdownCli(state);
     return 0;
 }

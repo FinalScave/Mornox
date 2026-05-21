@@ -9,23 +9,23 @@
 namespace vanta {
 
 struct CommandResult {
-    int exitCode = -1;
-    std::string standardOutput;
-    std::string standardError;
+    int exit_code = -1;
+    std::string standard_output;
+    std::string standard_error;
 };
 
 struct CommandSpec {
     std::string executable;
     std::vector<std::string> arguments;
-    std::filesystem::path workingDirectory;
+    std::filesystem::path working_directory;
 };
 
 struct CommandCallbacks {
-    std::function<void(const std::string&)> onStdout;
-    std::function<void(const std::string&)> onStderr;
+    std::function<void(const std::string&)> on_stdout;
+    std::function<void(const std::string&)> on_stderr;
 };
 
-CommandResult runCommand(const CommandSpec& spec, CommandCallbacks callbacks = {});
+CommandResult RunCommand(const CommandSpec& spec, CommandCallbacks callbacks = {});
 
 class ChildProcess {
 public:
@@ -36,25 +36,25 @@ public:
     ChildProcess& operator=(ChildProcess&& other) noexcept;
     ~ChildProcess();
 
-    bool start(const CommandSpec& spec, std::string* errorMessage = nullptr);
-    bool running() const;
-    std::optional<int> tryWait();
-    int wait();
-    bool writeStdin(const std::string& text);
-    std::string readStdoutAvailable();
-    std::string readStderrAvailable();
-    void terminate();
-    std::optional<int> exitCode() const;
+    bool Start(const CommandSpec& spec, std::string* error_message = nullptr);
+    bool Running() const;
+    std::optional<int> TryWait();
+    int Wait();
+    bool WriteStdin(const std::string& text);
+    std::string ReadStdoutAvailable();
+    std::string ReadStderrAvailable();
+    void Terminate();
+    std::optional<int> ExitCode() const;
 
 private:
-    void closePipes();
-    void rememberExitStatus(int status);
+    void ClosePipes();
+    void RememberExitStatus(int status);
 
     int pid_ = -1;
-    int stdinFd_ = -1;
-    int stdoutFd_ = -1;
-    int stderrFd_ = -1;
-    std::optional<int> exitCode_;
+    int stdin_fd_ = -1;
+    int stdout_fd_ = -1;
+    int stderr_fd_ = -1;
+    std::optional<int> exit_code_;
 };
 
 }

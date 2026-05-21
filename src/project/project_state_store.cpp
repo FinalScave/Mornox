@@ -1,25 +1,58 @@
-#include "vanta/project/project_state_store.h"
+#include "project/project_state_store.h"
 
 #include <fstream>
 #include <sstream>
 
+#include "vanta/core/value.h"
+#include "vanta/core/json_codec.h"
+
 namespace vanta {
 namespace {
 
-constexpr int currentSchemaVersion = 1;
+Value ProjectStateProjection(const ProjectState& state) {
+    Value::Object components;
+    for (const auto& [id, component_state] : state.component_states) {
+        components[id] = component_state;
+    }
+    return Value::ObjectValue({
+        {"schemaVersion", Value(static_cast<std::int64_t>(state.schema_version))},
+        {"project", Value::ObjectValue({
+            {"components", Value::ObjectValue(std::move(components))},
+        })},
+    });
+}
 
-ProjectState legacyLayoutState(const Json& json) {
+ProjectState ProjectStateFromValue(const Value& json) {
+    if (!json.IsObject()) {
+        return {};
+    }
+
+    if (!json.Contains("schemaVersion")) {
+        return {};
+    }
+
     ProjectState state;
-    state.schemaVersion = currentSchemaVersion;
-    if (json.isObject()) {
-        state.componentStates["vanta.ui.layout"] = json;
+    if (json["schemaVersion"].IsInt()) {
+        state.schema_version = static_cast<int>(json["schemaVersion"].AsInt());
+    }
+
+    if (!json.Contains("project") || !json["project"].IsObject()) {
+        return state;
+    }
+    const Value& project = json["project"];
+    if (!project.Contains("components") || !project["components"].IsObject()) {
+        return state;
+    }
+
+    for (const auto& [id, component_state] : project["components"].AsObject()) {
+        state.component_states[id] = component_state;
     }
     return state;
 }
 
 }
 
-bool ProjectStateStore::load(const std::filesystem::path& path, ProjectState* state, std::string* errorMessage) const {
+bool ProjectStateStore::Load(const std::filesystem::path& path, ProjectState* state, std::string* error_message) const {
     if (state == nullptr) {
         return false;
     }
@@ -32,78 +65,37 @@ bool ProjectStateStore::load(const std::filesystem::path& path, ProjectState* st
 
     std::ostringstream stream;
     stream << input.rdbuf();
-    try {
-        *state = projectStateFromJson(Json::parse(stream.str()));
-    } catch (const JsonError& error) {
+    Result<Value> parsed = ValueFromJsonText(stream.str());
+    if (!parsed) {
         *state = {};
-        if (errorMessage != nullptr) {
-            *errorMessage = error.what();
+        if (error_message != nullptr) {
+            *error_message = parsed.ErrorValue().message;
         }
         return false;
     }
+    *state = ProjectStateFromValue(parsed.Value());
     return true;
 }
 
-bool ProjectStateStore::save(const std::filesystem::path& path, const ProjectState& state, std::string* errorMessage) const {
+bool ProjectStateStore::Save(const std::filesystem::path& path, const ProjectState& state, std::string* error_message) const {
     std::error_code error;
     std::filesystem::create_directories(path.parent_path(), error);
     if (error) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Failed to create state directory";
+        if (error_message != nullptr) {
+            *error_message = "Failed to create state directory";
         }
         return false;
     }
 
     std::ofstream output(path);
     if (!output) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Failed to open state file";
+        if (error_message != nullptr) {
+            *error_message = "Failed to open state file";
         }
         return false;
     }
-    output << toJson(state).dump();
+    output << ValueToJsonText(ProjectStateProjection(state));
     return true;
-}
-
-Json toJson(const ProjectState& state) {
-    Json::Object components;
-    for (const auto& [id, componentState] : state.componentStates) {
-        components[id] = componentState;
-    }
-    return Json::object({
-        {"schemaVersion", Json(static_cast<std::int64_t>(state.schemaVersion))},
-        {"project", Json::object({
-            {"components", Json::object(std::move(components))},
-        })},
-    });
-}
-
-ProjectState projectStateFromJson(const Json& json) {
-    if (!json.isObject()) {
-        return {};
-    }
-
-    if (!json.contains("schemaVersion")) {
-        return legacyLayoutState(json);
-    }
-
-    ProjectState state;
-    if (json["schemaVersion"].isInt()) {
-        state.schemaVersion = static_cast<int>(json["schemaVersion"].asInt());
-    }
-
-    if (!json.contains("project") || !json["project"].isObject()) {
-        return state;
-    }
-    const Json& project = json["project"];
-    if (!project.contains("components") || !project["components"].isObject()) {
-        return state;
-    }
-
-    for (const auto& [id, componentState] : project["components"].asObject()) {
-        state.componentStates[id] = componentState;
-    }
-    return state;
 }
 
 }

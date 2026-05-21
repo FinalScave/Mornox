@@ -4,30 +4,30 @@
 
 namespace vanta {
 
-std::size_t offsetForPosition(const std::string& text, TextPosition position) {
+std::size_t OffsetForPosition(const std::string& text, TextPosition position) {
     std::size_t offset = 0;
-    int currentLine = 0;
-    while (offset < text.size() && currentLine < position.line) {
+    int current_line = 0;
+    while (offset < text.size() && current_line < position.line) {
         if (text[offset] == '\n') {
-            ++currentLine;
+            ++current_line;
         }
         ++offset;
     }
 
-    const std::size_t lineStart = offset;
-    while (offset < text.size() && text[offset] != '\n' && offset - lineStart < static_cast<std::size_t>(std::max(0, position.character))) {
+    const std::size_t line_start = offset;
+    while (offset < text.size() && text[offset] != '\n' && offset - line_start < static_cast<std::size_t>(std::max(0, position.character))) {
         ++offset;
     }
     return offset;
 }
 
-std::string applyTextEdit(const std::string& text, const TextEdit& edit) {
-    const std::size_t start = offsetForPosition(text, edit.range.start);
-    const std::size_t end = offsetForPosition(text, edit.range.end);
+std::string ApplyTextEdit(const std::string& text, const TextEdit& edit) {
+    const std::size_t start = OffsetForPosition(text, edit.range.start);
+    const std::size_t end = OffsetForPosition(text, edit.range.end);
     std::string result;
-    result.reserve(text.size() + edit.replacementText.size());
+    result.reserve(text.size() + edit.replacement_text.size());
     result.append(text.substr(0, start));
-    result.append(edit.replacementText);
+    result.append(edit.replacement_text);
     result.append(text.substr(std::min(end, text.size())));
     return result;
 }

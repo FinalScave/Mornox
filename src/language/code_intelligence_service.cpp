@@ -1,109 +1,147 @@
 #include "vanta/language/code_intelligence_service.h"
 
 #include <cstdint>
-#include <type_traits>
 #include <utility>
 
+#include "language/language_request_pipeline.h"
 #include "vanta/workspace/workspace_context.h"
 
 namespace vanta {
+
+struct CodeIntelligenceService::Impl {
+    internal::LanguageRequestPipeline language_requests;
+};
+
 namespace {
 
-LanguageRequestKind toLanguageRequestKind(CodeIntelligenceKind kind) {
+internal::LanguageRequestKind ToLanguageRequestKind(CodeIntelligenceKind kind) {
     switch (kind) {
     case CodeIntelligenceKind::Completion:
     case CodeIntelligenceKind::InlineCompletion:
-        return LanguageRequestKind::Completion;
+        return internal::LanguageRequestKind::Completion;
     case CodeIntelligenceKind::Hover:
-        return LanguageRequestKind::Hover;
+        return internal::LanguageRequestKind::Hover;
     case CodeIntelligenceKind::Definition:
-        return LanguageRequestKind::Definition;
+        return internal::LanguageRequestKind::Definition;
     case CodeIntelligenceKind::SemanticTokens:
-        return LanguageRequestKind::SemanticTokensFull;
+        return internal::LanguageRequestKind::SemanticTokensFull;
     }
-    return LanguageRequestKind::Completion;
+    return internal::LanguageRequestKind::Completion;
 }
 
-LanguageRequest toLanguageRequest(const CodeCompletionRequest& request) {
-    LanguageRequest languageRequest;
-    languageRequest.kind = LanguageRequestKind::Completion;
-    languageRequest.document = request.document;
-    languageRequest.position = request.position;
-    languageRequest.documentVersion = request.documentVersion;
-    languageRequest.timeout = request.timeout;
-    languageRequest.cancellation = request.cancellation;
-    return languageRequest;
+internal::LanguageRequest ToLanguageRequest(const CodeCompletionRequest& request) {
+    internal::LanguageRequest language_request;
+    language_request.kind = internal::LanguageRequestKind::Completion;
+    language_request.document = request.document;
+    language_request.position = request.position;
+    language_request.document_version = request.document_version;
+    language_request.timeout = request.timeout;
+    language_request.cancellation = request.cancellation;
+    return language_request;
 }
 
-std::vector<CodeCompletionItem> itemsFromLanguageResult(const LanguagePipelineResult& result) {
+std::vector<CodeCompletionItem> ItemsFromLanguageResult(const internal::LanguagePipelineResult& result) {
     std::vector<CodeCompletionItem> items;
-    const auto* completionList = std::get_if<CompletionList>(&result.payload);
-    if (completionList == nullptr) {
+    const auto* completion_list = std::get_if<CompletionList>(&result.payload);
+    if (completion_list == nullptr) {
         return items;
     }
-    for (const CompletionItem& item : completionList->items) {
+    for (const CompletionItem& item : completion_list->items) {
         CodeCompletionItem completion;
         completion.label = item.label;
-        completion.insertText = item.insertText.empty() ? item.label : item.insertText;
+        completion.insert_text = item.insert_text.empty() ? item.label : item.insert_text;
         completion.detail = item.detail;
         completion.documentation = item.documentation;
         completion.source = "language";
-        if (!completion.label.empty() || !completion.insertText.empty()) {
+        if (!completion.label.empty() || !completion.insert_text.empty()) {
             items.push_back(std::move(completion));
         }
     }
     return items;
 }
 
-Json dataFromLanguageResult(const LanguagePipelineResult& result) {
-    return std::visit([](const auto& value) -> Json {
-        using Value = std::decay_t<decltype(value)>;
-        if constexpr (std::is_same_v<Value, std::monostate>) {
-            return Json(nullptr);
-        } else {
-            return value.raw;
-        }
-    }, result.payload);
+void CopyPipelineState(const internal::LanguagePipelineResult& pipeline, CodeIntelligenceResult& result) {
+    result.ok = pipeline.ok;
+    result.stale = pipeline.stale;
+    result.cancelled = pipeline.cancelled;
+    result.timed_out = pipeline.timed_out;
+    result.error = pipeline.error;
+    result.document_uri = pipeline.document_uri;
+    result.requested_version = pipeline.requested_version;
+    result.current_version = pipeline.current_version;
+    result.payload = pipeline.payload;
+}
+
+void CopyPipelineState(const internal::LanguagePipelineResult& pipeline, CodeCompletionResult& result) {
+    result.ok = pipeline.ok;
+    result.stale = pipeline.stale;
+    result.cancelled = pipeline.cancelled;
+    result.timed_out = pipeline.timed_out;
+    result.error = pipeline.error;
 }
 
 }
 
-void CodeIntelligenceService::addCompletionProvider(std::unique_ptr<CodeCompletionProvider> provider) {
-    if (provider == nullptr || provider->id().empty()) {
-        return;
-    }
-    completionProviders_[provider->id()] = std::move(provider);
+CodeIntelligenceService::CodeIntelligenceService()
+    : impl_(std::make_unique<Impl>()) {
 }
 
-RegistrationHandle CodeIntelligenceService::registerCompletionProvider(std::unique_ptr<CodeCompletionProvider> provider) {
-    if (provider == nullptr || provider->id().empty()) {
+CodeIntelligenceService::~CodeIntelligenceService() = default;
+
+RegistrationHandle CodeIntelligenceService::RegisterCompletionProvider(std::unique_ptr<CodeCompletionProvider> provider) {
+    if (provider == nullptr || provider->Id().empty()) {
         return {};
     }
-    const std::string providerId = provider->id();
-    addCompletionProvider(std::move(provider));
-    return RegistrationHandle([this, providerId] {
-        removeCompletionProvider(providerId);
+    const std::string provider_id = provider->Id();
+    completion_providers_[provider_id] = std::move(provider);
+    return RegistrationHandle([this, provider_id] {
+        RemoveCompletionProvider(provider_id);
     });
 }
 
-void CodeIntelligenceService::removeCompletionProvider(const std::string& providerId) {
-    completionProviders_.erase(providerId);
+void CodeIntelligenceService::RemoveCompletionProvider(const std::string& provider_id) {
+    completion_providers_.erase(provider_id);
 }
 
-std::vector<std::string> CodeIntelligenceService::completionProviderIds() const {
+std::vector<std::string> CodeIntelligenceService::CompletionProviderIds() const {
     std::vector<std::string> ids;
-    for (const auto& [id, provider] : completionProviders_) {
+    for (const auto& [id, provider] : completion_providers_) {
         (void)provider;
         ids.push_back(id);
     }
     return ids;
 }
 
-CodeCompletionResult CodeIntelligenceService::complete(WorkspaceContext& context, const CodeCompletionRequest& request) {
-    CodeCompletionResult result = languageCompletion(context, request);
-    for (const auto& [id, provider] : completionProviders_) {
+RegistrationHandle CodeIntelligenceService::RegisterInlineCompletionProvider(std::unique_ptr<CodeCompletionProvider> provider) {
+    if (provider == nullptr || provider->Id().empty()) {
+        return {};
+    }
+    const std::string provider_id = provider->Id();
+    inline_completion_providers_[provider_id] = std::move(provider);
+    return RegistrationHandle([this, provider_id] {
+        RemoveInlineCompletionProvider(provider_id);
+    });
+}
+
+void CodeIntelligenceService::RemoveInlineCompletionProvider(const std::string& provider_id) {
+    inline_completion_providers_.erase(provider_id);
+}
+
+std::vector<std::string> CodeIntelligenceService::InlineCompletionProviderIds() const {
+    std::vector<std::string> ids;
+    for (const auto& [id, provider] : inline_completion_providers_) {
+        (void)provider;
+        ids.push_back(id);
+    }
+    return ids;
+}
+
+CodeCompletionResult CodeIntelligenceService::Complete(WorkspaceContext& context, const CodeCompletionRequest& request) {
+    CodeCompletionResult result = request.mode == CodeCompletionMode::Inline ? CodeCompletionResult{.mode = request.mode} : LanguageCompletion(context, request);
+    const auto& providers = request.mode == CodeCompletionMode::Inline ? inline_completion_providers_ : completion_providers_;
+    for (const auto& [id, provider] : providers) {
         (void)id;
-        CodeCompletionResult provided = provider->complete(context, request);
+        CodeCompletionResult provided = provider->Complete(context, request);
         if (provided.ok) {
             result.ok = true;
         }
@@ -115,42 +153,32 @@ CodeCompletionResult CodeIntelligenceService::complete(WorkspaceContext& context
     return result;
 }
 
-CodeIntelligenceResult CodeIntelligenceService::query(WorkspaceContext& context, const CodeIntelligenceRequest& request) {
-    LanguageRequest languageRequest;
-    languageRequest.kind = toLanguageRequestKind(request.kind);
-    languageRequest.document = request.document;
-    languageRequest.position = request.position;
-    languageRequest.documentVersion = request.documentVersion;
-    languageRequest.timeout = request.timeout;
-    languageRequest.cancellation = request.cancellation;
+CodeIntelligenceResult CodeIntelligenceService::Query(WorkspaceContext& context, const CodeIntelligenceRequest& request) {
+    internal::LanguageRequest language_request;
+    language_request.kind = ToLanguageRequestKind(request.kind);
+    language_request.document = request.document;
+    language_request.position = request.position;
+    language_request.document_version = request.document_version;
+    language_request.timeout = request.timeout;
+    language_request.cancellation = request.cancellation;
 
     CodeIntelligenceResult result;
     result.kind = request.kind;
-    result.language = context.languageRequests().execute(languageRequest, context.documents(), context.languages());
-    result.ok = result.language.ok;
-    result.stale = result.language.stale;
-    result.cancelled = result.language.cancelled;
-    result.timedOut = result.language.timedOut;
-    result.error = result.language.error;
-    result.data = dataFromLanguageResult(result.language);
+    const internal::LanguagePipelineResult pipeline = impl_->language_requests.Execute(language_request, context.Documents(), context.Languages());
+    CopyPipelineState(pipeline, result);
     return result;
 }
 
-CodeCompletionResult CodeIntelligenceService::languageCompletion(WorkspaceContext& context, const CodeCompletionRequest& request) {
+CodeCompletionResult CodeIntelligenceService::LanguageCompletion(WorkspaceContext& context, const CodeCompletionRequest& request) {
     CodeCompletionResult result;
     result.mode = request.mode;
-    result.language = context.languageRequests().execute(toLanguageRequest(request), context.documents(), context.languages());
-    result.ok = result.language.ok;
-    result.stale = result.language.stale;
-    result.cancelled = result.language.cancelled;
-    result.timedOut = result.language.timedOut;
-    result.error = result.language.error;
-    result.data = dataFromLanguageResult(result.language);
-    result.items = itemsFromLanguageResult(result.language);
+    const internal::LanguagePipelineResult pipeline = impl_->language_requests.Execute(ToLanguageRequest(request), context.Documents(), context.Languages());
+    CopyPipelineState(pipeline, result);
+    result.items = ItemsFromLanguageResult(pipeline);
     return result;
 }
 
-std::string toString(CodeCompletionMode mode) {
+std::string ToString(CodeCompletionMode mode) {
     switch (mode) {
     case CodeCompletionMode::Explicit:
         return "explicit";
@@ -160,7 +188,7 @@ std::string toString(CodeCompletionMode mode) {
     return "explicit";
 }
 
-std::string toString(CodeIntelligenceKind kind) {
+std::string ToString(CodeIntelligenceKind kind) {
     switch (kind) {
     case CodeIntelligenceKind::Completion:
         return "completion";
@@ -174,48 +202,6 @@ std::string toString(CodeIntelligenceKind kind) {
         return "semanticTokens";
     }
     return "completion";
-}
-
-Json toJson(const CodeCompletionItem& item) {
-    return Json::object({
-        {"label", Json(item.label)},
-        {"insertText", Json(item.insertText)},
-        {"detail", Json(item.detail)},
-        {"documentation", Json(item.documentation)},
-        {"source", Json(item.source)},
-        {"score", Json(item.score)},
-    });
-}
-
-Json toJson(const CodeCompletionResult& result) {
-    Json::Array items;
-    for (const CodeCompletionItem& item : result.items) {
-        items.push_back(toJson(item));
-    }
-    return Json::object({
-        {"mode", Json(toString(result.mode))},
-        {"ok", Json(result.ok)},
-        {"stale", Json(result.stale)},
-        {"cancelled", Json(result.cancelled)},
-        {"timedOut", Json(result.timedOut)},
-        {"error", Json(result.error)},
-        {"items", Json::array(std::move(items))},
-        {"language", languagePipelineResultToJson(result.language)},
-        {"data", result.data},
-    });
-}
-
-Json toJson(const CodeIntelligenceResult& result) {
-    return Json::object({
-        {"kind", Json(toString(result.kind))},
-        {"ok", Json(result.ok)},
-        {"stale", Json(result.stale)},
-        {"cancelled", Json(result.cancelled)},
-        {"timedOut", Json(result.timedOut)},
-        {"error", Json(result.error)},
-        {"language", languagePipelineResultToJson(result.language)},
-        {"data", result.data},
-    });
 }
 
 }

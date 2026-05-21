@@ -1,19 +1,19 @@
-#include "vanta/language/language_request_pipeline.h"
+#include "language/language_request_pipeline.h"
 
 #include <type_traits>
 #include <utility>
 
-namespace vanta {
+namespace vanta::internal {
 namespace {
 
-std::uint64_t currentDocumentVersion(const DocumentService& documents, const VirtualFile& file) {
-    auto snapshot = documents.readSnapshot(file);
+std::uint64_t CurrentDocumentVersion(const DocumentService& documents, const VirtualFile& file) {
+    auto snapshot = documents.ReadSnapshot(file);
     return snapshot ? snapshot->version : 0;
 }
 
-LanguagePipelinePayload callService(LanguageService& service, const LanguageRequest& request) {
+CodeIntelligencePayload CallService(LanguageService& service, const LanguageRequest& request) {
     if (request.kind == LanguageRequestKind::SemanticTokensFull) {
-        return service.semanticTokensFull(request.document);
+        return service.SemanticTokensFull(request.document);
     }
 
     TextDocumentPosition position;
@@ -21,18 +21,18 @@ LanguagePipelinePayload callService(LanguageService& service, const LanguageRequ
     position.position = request.position;
     switch (request.kind) {
     case LanguageRequestKind::Completion:
-        return service.completion(position);
+        return service.Completion(position);
     case LanguageRequestKind::Hover:
-        return service.hover(position);
+        return service.Hover(position);
     case LanguageRequestKind::Definition:
-        return service.definition(position);
+        return service.Definition(position);
     case LanguageRequestKind::SemanticTokensFull:
         break;
     }
     return std::monostate{};
 }
 
-bool payloadOk(const LanguagePipelinePayload& payload) {
+bool PayloadOk(const CodeIntelligencePayload& payload) {
     return std::visit([](const auto& value) -> bool {
         using Value = std::decay_t<decltype(value)>;
         if constexpr (std::is_same_v<Value, std::monostate>) {
@@ -43,10 +43,10 @@ bool payloadOk(const LanguagePipelinePayload& payload) {
     }, payload);
 }
 
-std::string payloadError(const LanguagePipelinePayload& payload) {
+std::string PayloadError(const CodeIntelligencePayload& payload) {
     return std::visit([](const auto& value) -> std::string {
-        using Value = std::decay_t<decltype(value)>;
-        if constexpr (std::is_same_v<Value, std::monostate>) {
+        using Payload = std::decay_t<decltype(value)>;
+        if constexpr (std::is_same_v<Payload, std::monostate>) {
             return "";
         } else {
             return value.error;
@@ -54,74 +54,63 @@ std::string payloadError(const LanguagePipelinePayload& payload) {
     }, payload);
 }
 
-Json payloadToJson(const LanguagePipelinePayload& payload) {
-    return std::visit([](const auto& value) -> Json {
-        using Value = std::decay_t<decltype(value)>;
-        if constexpr (std::is_same_v<Value, std::monostate>) {
-            return Json(nullptr);
-        } else {
-            return languageResultToJson(value);
-        }
-    }, payload);
 }
 
-}
-
-LanguagePipelineResult LanguageRequestPipeline::execute(
+LanguagePipelineResult LanguageRequestPipeline::Execute(
     const LanguageRequest& request,
     const DocumentService& documents,
     LanguageRegistry& languages) {
     LanguagePipelineResult result;
-    result.requestId = nextRequestId_++;
+    result.request_id = next_request_id_++;
     result.kind = request.kind;
-    result.documentUri = request.document.file.toUri();
-    result.requestedVersion = request.documentVersion;
+    result.document_uri = request.document.file.ToUri();
+    result.requested_version = request.document_version;
 
-    if (request.cancellation.cancelled()) {
+    if (request.cancellation.Cancelled()) {
         result.cancelled = true;
         result.error = "Language request was cancelled";
         return result;
     }
 
-    LanguageService* service = languages.serviceForDocument(request.document.file);
+    LanguageService* service = languages.ServiceForDocument(request.document.file);
     if (service == nullptr) {
         result.error = "No language service is registered for document";
         return result;
     }
 
-    const std::uint64_t versionBefore = currentDocumentVersion(documents, request.document.file);
-    const std::uint64_t expectedVersion = request.documentVersion == 0 ? versionBefore : request.documentVersion;
-    result.requestedVersion = expectedVersion;
-    if (expectedVersion != 0 && versionBefore != 0 && versionBefore != expectedVersion) {
+    const std::uint64_t version_before = CurrentDocumentVersion(documents, request.document.file);
+    const std::uint64_t expected_version = request.document_version == 0 ? version_before : request.document_version;
+    result.requested_version = expected_version;
+    if (expected_version != 0 && version_before != 0 && version_before != expected_version) {
         result.stale = true;
-        result.currentVersion = versionBefore;
+        result.current_version = version_before;
         result.error = "Document version changed before request";
         return result;
     }
 
     const auto started = std::chrono::steady_clock::now();
-    result.payload = callService(*service, request);
+    result.payload = CallService(*service, request);
     result.elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started);
-    result.currentVersion = currentDocumentVersion(documents, request.document.file);
+    result.current_version = CurrentDocumentVersion(documents, request.document.file);
 
-    result.cancelled = request.cancellation.cancelled();
-    result.timedOut = request.timeout.count() > 0 && result.elapsed > request.timeout;
-    result.stale = expectedVersion != 0 && result.currentVersion != 0 && result.currentVersion != expectedVersion;
+    result.cancelled = request.cancellation.Cancelled();
+    result.timed_out = request.timeout.count() > 0 && result.elapsed > request.timeout;
+    result.stale = expected_version != 0 && result.current_version != 0 && result.current_version != expected_version;
 
     if (result.cancelled) {
         result.error = "Language request was cancelled";
-    } else if (result.timedOut) {
+    } else if (result.timed_out) {
         result.error = "Language request timed out";
     } else if (result.stale) {
         result.error = "Language result is stale";
     } else {
-        result.error = payloadError(result.payload);
+        result.error = PayloadError(result.payload);
     }
-    result.ok = payloadOk(result.payload) && !result.cancelled && !result.timedOut && !result.stale;
+    result.ok = PayloadOk(result.payload) && !result.cancelled && !result.timed_out && !result.stale;
     return result;
 }
 
-std::string toString(LanguageRequestKind kind) {
+std::string ToString(LanguageRequestKind kind) {
     switch (kind) {
     case LanguageRequestKind::Completion:
         return "completion";
@@ -133,23 +122,6 @@ std::string toString(LanguageRequestKind kind) {
         return "semanticTokensFull";
     }
     return "completion";
-}
-
-Json languagePipelineResultToJson(const LanguagePipelineResult& result) {
-    return Json::object({
-        {"requestId", Json(static_cast<std::int64_t>(result.requestId))},
-        {"kind", Json(toString(result.kind))},
-        {"document", Json(result.documentUri.string())},
-        {"requestedVersion", Json(static_cast<std::int64_t>(result.requestedVersion))},
-        {"currentVersion", Json(static_cast<std::int64_t>(result.currentVersion))},
-        {"ok", Json(result.ok)},
-        {"cancelled", Json(result.cancelled)},
-        {"stale", Json(result.stale)},
-        {"timedOut", Json(result.timedOut)},
-        {"elapsedMs", Json(static_cast<std::int64_t>(result.elapsed.count()))},
-        {"error", Json(result.error)},
-        {"result", payloadToJson(result.payload)},
-    });
 }
 
 }

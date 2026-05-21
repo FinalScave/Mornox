@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-#include "vanta/platform/async.h"
-#include "vanta/platform/json.h"
+#include "vanta/core/event.h"
+#include "vanta/core/value.h"
 
 namespace vanta {
 
@@ -20,10 +20,10 @@ enum class CapabilityStatus {
 struct Capability {
     std::string id;
     std::string title;
-    std::string providerId;
+    std::string provider_id;
     CapabilityStatus status = CapabilityStatus::Unavailable;
     std::string message;
-    Json data;
+    std::vector<std::pair<std::string, std::string>> details;
 };
 
 struct CapabilityChangeEvent {
@@ -32,24 +32,22 @@ struct CapabilityChangeEvent {
 
 class CapabilityRegistry {
 public:
-    void set(Capability capability);
-    bool remove(const std::string& id);
-    std::optional<Capability> capability(const std::string& id) const;
-    std::vector<Capability> capabilities() const;
-    bool available(const std::string& id) const;
-    void clear();
-    std::uint64_t onDidChangeCapability(EventBus<CapabilityChangeEvent>::Listener listener);
-    void removeCapabilityListener(std::uint64_t listenerId);
+    void Set(Capability capability);
+    bool Remove(const std::string& id);
+    std::optional<Capability> Get(const std::string& id) const;
+    std::vector<Capability> Capabilities() const;
+    bool Available(const std::string& id) const;
+    void Clear();
+    std::uint64_t OnDidChangeCapability(EventBus<CapabilityChangeEvent>::Listener listener);
+    void RemoveCapabilityListener(std::uint64_t listener_id);
 
 private:
-    void publish(const Capability& capability);
+    void Publish(const Capability& capability);
 
     std::map<std::string, Capability> capabilities_;
-    EventBus<CapabilityChangeEvent> onDidChange_;
+    EventBus<CapabilityChangeEvent> on_did_change_;
 };
 
-std::string toString(CapabilityStatus status);
-Json toJson(const Capability& capability);
-Json toJson(const std::vector<Capability>& capabilities);
+std::string ToString(CapabilityStatus status);
 
 }

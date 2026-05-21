@@ -4,12 +4,13 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <variant>
 #include <vector>
 
 #include "vanta/core/registration.h"
-#include "vanta/language/language_request_pipeline.h"
+#include "vanta/language/language_service.h"
 #include "vanta/platform/async.h"
-#include "vanta/platform/json.h"
+#include "vanta/core/value.h"
 
 namespace vanta {
 
@@ -23,11 +24,13 @@ enum class CodeIntelligenceKind {
     SemanticTokens,
 };
 
+using CodeIntelligencePayload = std::variant<std::monostate, CompletionList, HoverResult, LocationResult, SemanticTokens>;
+
 struct CodeIntelligenceRequest {
     CodeIntelligenceKind kind = CodeIntelligenceKind::Completion;
     TextDocumentIdentifier document;
     TextPosition position;
-    std::uint64_t documentVersion = 0;
+    std::uint64_t document_version = 0;
     std::chrono::milliseconds timeout = std::chrono::milliseconds(3000);
     CancellationToken cancellation;
     std::string intent;
@@ -38,10 +41,12 @@ struct CodeIntelligenceResult {
     bool ok = false;
     bool stale = false;
     bool cancelled = false;
-    bool timedOut = false;
+    bool timed_out = false;
     std::string error;
-    LanguagePipelineResult language;
-    Json data;
+    Uri document_uri;
+    std::uint64_t requested_version = 0;
+    std::uint64_t current_version = 0;
+    CodeIntelligencePayload payload;
 };
 
 enum class CodeCompletionMode {
@@ -53,7 +58,7 @@ struct CodeCompletionRequest {
     CodeCompletionMode mode = CodeCompletionMode::Explicit;
     TextDocumentIdentifier document;
     TextPosition position;
-    std::uint64_t documentVersion = 0;
+    std::uint64_t document_version = 0;
     std::chrono::milliseconds timeout = std::chrono::milliseconds(3000);
     CancellationToken cancellation;
     std::string intent;
@@ -61,8 +66,8 @@ struct CodeCompletionRequest {
 
 struct CodeCompletionItem {
     std::string label;
-    std::string insertText;
-    TextRange replaceRange;
+    std::string insert_text;
+    TextRange replace_range;
     std::string detail;
     std::string documentation;
     std::string source;
@@ -74,40 +79,44 @@ struct CodeCompletionResult {
     bool ok = false;
     bool stale = false;
     bool cancelled = false;
-    bool timedOut = false;
+    bool timed_out = false;
     std::string error;
     std::vector<CodeCompletionItem> items;
-    LanguagePipelineResult language;
-    Json data;
 };
 
 class CodeCompletionProvider {
 public:
     virtual ~CodeCompletionProvider() = default;
 
-    virtual std::string id() const = 0;
-    virtual CodeCompletionResult complete(WorkspaceContext& context, const CodeCompletionRequest& request) const = 0;
+    virtual std::string Id() const = 0;
+    virtual CodeCompletionResult Complete(WorkspaceContext& context, const CodeCompletionRequest& request) const = 0;
 };
 
 class CodeIntelligenceService {
 public:
-    void addCompletionProvider(std::unique_ptr<CodeCompletionProvider> provider);
-    RegistrationHandle registerCompletionProvider(std::unique_ptr<CodeCompletionProvider> provider);
-    void removeCompletionProvider(const std::string& providerId);
-    std::vector<std::string> completionProviderIds() const;
-    CodeCompletionResult complete(WorkspaceContext& context, const CodeCompletionRequest& request);
-    CodeIntelligenceResult query(WorkspaceContext& context, const CodeIntelligenceRequest& request);
+    CodeIntelligenceService();
+    ~CodeIntelligenceService();
+
+    RegistrationHandle RegisterCompletionProvider(std::unique_ptr<CodeCompletionProvider> provider);
+    void RemoveCompletionProvider(const std::string& provider_id);
+    std::vector<std::string> CompletionProviderIds() const;
+    RegistrationHandle RegisterInlineCompletionProvider(std::unique_ptr<CodeCompletionProvider> provider);
+    void RemoveInlineCompletionProvider(const std::string& provider_id);
+    std::vector<std::string> InlineCompletionProviderIds() const;
+    CodeCompletionResult Complete(WorkspaceContext& context, const CodeCompletionRequest& request);
+    CodeIntelligenceResult Query(WorkspaceContext& context, const CodeIntelligenceRequest& request);
 
 private:
-    CodeCompletionResult languageCompletion(WorkspaceContext& context, const CodeCompletionRequest& request);
+    struct Impl;
 
-    std::map<std::string, std::unique_ptr<CodeCompletionProvider>> completionProviders_;
+    CodeCompletionResult LanguageCompletion(WorkspaceContext& context, const CodeCompletionRequest& request);
+
+    std::unique_ptr<Impl> impl_;
+    std::map<std::string, std::unique_ptr<CodeCompletionProvider>> completion_providers_;
+    std::map<std::string, std::unique_ptr<CodeCompletionProvider>> inline_completion_providers_;
 };
 
-std::string toString(CodeCompletionMode mode);
-std::string toString(CodeIntelligenceKind kind);
-Json toJson(const CodeCompletionItem& item);
-Json toJson(const CodeCompletionResult& result);
-Json toJson(const CodeIntelligenceResult& result);
+std::string ToString(CodeCompletionMode mode);
+std::string ToString(CodeIntelligenceKind kind);
 
 }

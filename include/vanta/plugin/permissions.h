@@ -13,22 +13,19 @@ enum class Permission {
     NetworkAccess,
     GitRead,
     GitWrite,
-    AgentTool,
-    LanguageService,
-    BuildProvider,
 };
 
 class PermissionSet {
 public:
-    static PermissionSet fromStrings(const std::vector<std::string>& permissions);
+    static PermissionSet FromStrings(const std::vector<std::string>& permissions);
 
-    void add(Permission permission);
-    bool contains(Permission permission) const;
+    void Add(Permission permission);
+    bool Contains(Permission permission) const;
 
 private:
     std::set<Permission> permissions_;
 };
 
-std::string toString(Permission permission);
+std::string ToString(Permission permission);
 
 }

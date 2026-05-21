@@ -8,13 +8,14 @@
 #include <thread>
 #include <utility>
 
-#include "vanta/workspace/workspace_context.h"
+#include "vanta/execution/job_service.h"
 #include "vanta/platform/process.h"
+#include "vanta/workspace/workspace_context.h"
 
 namespace vanta {
 namespace {
 
-std::atomic_uint64_t nextExecutionId = 1;
+std::atomic_uint64_t next_execution_id = 1;
 
 }
 
@@ -29,12 +30,12 @@ struct ExecutionState {
         }
     }
 
-    std::uint64_t id = nextExecutionId++;
-    JobId jobId = 0;
+    std::uint64_t id = next_execution_id++;
+    JobId job_id = 0;
     mutable std::mutex mutex;
     std::condition_variable completed;
     ExecutionStatus status = ExecutionStatus::Pending;
-    bool cancelRequested = false;
+    bool cancel_requested = false;
     std::optional<ExecutionResult> result;
     std::vector<ExecutionEvent> events;
     std::string output;
@@ -44,15 +45,7 @@ struct ExecutionState {
 
 namespace {
 
-Json stringArrayToJson(const std::vector<std::string>& values) {
-    Json::Array array;
-    for (const std::string& value : values) {
-        array.push_back(Json(value));
-    }
-    return Json::array(std::move(array));
-}
-
-void emitEvent(const std::shared_ptr<ExecutionState>& state, ExecutionEventCallback& onEvent, ExecutionEvent event) {
+void EmitEvent(const std::shared_ptr<ExecutionState>& state, ExecutionEventCallback& on_event, ExecutionEvent event) {
     bool completed = false;
     {
         std::lock_guard<std::mutex> lock(state->mutex);
@@ -61,30 +54,30 @@ void emitEvent(const std::shared_ptr<ExecutionState>& state, ExecutionEventCallb
         } else if (event.kind == ExecutionEventKind::Stdout || event.kind == ExecutionEventKind::Stderr) {
             state->output += event.text;
         } else if (event.kind == ExecutionEventKind::Finished) {
-            state->status = state->cancelRequested ? ExecutionStatus::Cancelled : (event.exitCode == 0 ? ExecutionStatus::Succeeded : ExecutionStatus::Failed);
+            state->status = state->cancel_requested ? ExecutionStatus::Cancelled : (event.exit_code == 0 ? ExecutionStatus::Succeeded : ExecutionStatus::Failed);
             completed = true;
         }
         state->events.push_back(event);
         if (completed) {
             state->result = ExecutionResult{
-                .exitCode = event.exitCode,
+                .exit_code = event.exit_code,
                 .output = state->output,
-                .jobId = state->jobId,
+                .job_id = state->job_id,
                 .events = state->events,
             };
         }
     }
-    if (onEvent) {
-        onEvent(event);
+    if (on_event) {
+        on_event(event);
     }
     if (completed) {
         state->completed.notify_all();
     }
 }
 
-ExecutionHandle completedHandle(ExecutionResult result, ExecutionStatus status, ExecutionEventCallback onEvent = {}) {
+ExecutionHandle CompletedHandle(ExecutionResult result, ExecutionStatus status, ExecutionEventCallback on_event = {}) {
     auto state = std::make_shared<ExecutionState>();
-    state->jobId = result.jobId;
+    state->job_id = result.job_id;
     {
         std::lock_guard<std::mutex> lock(state->mutex);
         state->status = status;
@@ -92,9 +85,9 @@ ExecutionHandle completedHandle(ExecutionResult result, ExecutionStatus status, 
         state->output = result.output;
         state->result = std::move(result);
     }
-    if (onEvent) {
+    if (on_event) {
         for (const ExecutionEvent& event : state->events) {
-            onEvent(event);
+            on_event(event);
         }
     }
     state->completed.notify_all();
@@ -103,43 +96,41 @@ ExecutionHandle completedHandle(ExecutionResult result, ExecutionStatus status, 
 
 class LocalExecutionProvider final : public ExecutionProvider {
 public:
-    std::string id() const override {
+    std::string Id() const override {
         return "vanta.localExecutor";
     }
 
-    std::vector<ExecutionTarget> targets(WorkspaceContext& context) const override {
+    std::vector<ExecutionTarget> Targets(WorkspaceContext& context) const override {
         (void)context;
         return {{
             .id = "local.default",
-            .executorId = id(),
+            .executor_id = Id(),
             .name = "Local Machine",
+            .kind = ExecutionTargetKind::Local,
             .capabilities = {"run", "debug"},
-            .metadata = Json::object({
-                {"kind", Json("local")},
-            }),
         }};
     }
 
-    ExecutionHandle start(
+    ExecutionHandle Start(
         WorkspaceContext& context,
         const ExecutionRequest& request,
         const ExecutionTarget& target,
-        ExecutionEventCallback onEvent = {}) const override {
+        ExecutionEventCallback on_event = {}) const override {
         (void)context;
         auto state = std::make_shared<ExecutionState>();
-        state->jobId = request.jobId;
+        state->job_id = request.job_id;
 
-        state->worker = std::thread([state, request, target, onEvent = std::move(onEvent)]() mutable {
+        state->worker = std::thread([state, request, target, on_event = std::move(on_event)]() mutable {
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
                 state->process = std::make_unique<ChildProcess>();
             }
 
-            emitEvent(state, onEvent, {
+            EmitEvent(state, on_event, {
                 .kind = ExecutionEventKind::Started,
-                .jobId = request.jobId,
-                .executorId = target.executorId,
-                .targetId = target.id,
+                .job_id = request.job_id,
+                .executor_id = target.executor_id,
+                .target_id = target.id,
                 .progress = 0.0,
             });
 
@@ -147,72 +138,72 @@ public:
             bool started = false;
             {
                 std::lock_guard<std::mutex> lock(state->mutex);
-                started = state->process->start({
+                started = state->process->Start({
                     .executable = request.executable,
                     .arguments = request.arguments,
-                    .workingDirectory = request.workingDirectory,
+                    .working_directory = request.working_directory,
                 }, &error);
             }
             if (!started) {
-                emitEvent(state, onEvent, {
+                EmitEvent(state, on_event, {
                     .kind = ExecutionEventKind::Stderr,
-                    .jobId = request.jobId,
-                    .executorId = target.executorId,
-                    .targetId = target.id,
+                    .job_id = request.job_id,
+                    .executor_id = target.executor_id,
+                    .target_id = target.id,
                     .text = error.empty() ? "Failed to start process\n" : error + "\n",
                 });
-                emitEvent(state, onEvent, {
+                EmitEvent(state, on_event, {
                     .kind = ExecutionEventKind::Finished,
-                    .jobId = request.jobId,
-                    .executorId = target.executorId,
-                    .targetId = target.id,
+                    .job_id = request.job_id,
+                    .executor_id = target.executor_id,
+                    .target_id = target.id,
                     .progress = 1.0,
-                    .exitCode = -1,
+                    .exit_code = -1,
                 });
                 return;
             }
 
-            int exitCode = -1;
+            int exit_code = -1;
             while (true) {
-                std::string stdoutChunk;
-                std::string stderrChunk;
+                std::string stdout_chunk;
+                std::string stderr_chunk;
                 std::optional<int> finished;
-                bool shouldCancel = false;
+                bool should_cancel = false;
                 {
                     std::lock_guard<std::mutex> lock(state->mutex);
                     if (state->process != nullptr) {
-                        stdoutChunk = state->process->readStdoutAvailable();
-                        stderrChunk = state->process->readStderrAvailable();
-                        shouldCancel = state->cancelRequested;
-                        if (shouldCancel) {
-                            state->process->terminate();
-                            finished = state->process->exitCode().value_or(130);
+                        stdout_chunk = state->process->ReadStdoutAvailable();
+                        stderr_chunk = state->process->ReadStderrAvailable();
+                        should_cancel = state->cancel_requested;
+                        if (should_cancel) {
+                            state->process->Terminate();
+                            finished = state->process->ExitCode().value_or(130);
                         } else {
-                            finished = state->process->tryWait();
+                            finished = state->process->TryWait();
                         }
                     }
                 }
 
-                if (!stdoutChunk.empty()) {
-                    emitEvent(state, onEvent, {
+                if (!stdout_chunk.empty()) {
+                    EmitEvent(state, on_event, {
                         .kind = ExecutionEventKind::Stdout,
-                        .jobId = request.jobId,
-                        .executorId = target.executorId,
-                        .targetId = target.id,
-                        .text = stdoutChunk,
+                        .job_id = request.job_id,
+                        .executor_id = target.executor_id,
+                        .target_id = target.id,
+                        .text = stdout_chunk,
                     });
                 }
-                if (!stderrChunk.empty()) {
-                    emitEvent(state, onEvent, {
+                if (!stderr_chunk.empty()) {
+                    EmitEvent(state, on_event, {
                         .kind = ExecutionEventKind::Stderr,
-                        .jobId = request.jobId,
-                        .executorId = target.executorId,
-                        .targetId = target.id,
-                        .text = stderrChunk,
+                        .job_id = request.job_id,
+                        .executor_id = target.executor_id,
+                        .target_id = target.id,
+                        .text = stderr_chunk,
                     });
                 }
                 if (finished) {
-                    exitCode = *finished;
+                    exit_code = *finished;
                     break;
                 }
                 std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -222,13 +213,13 @@ public:
                 std::lock_guard<std::mutex> lock(state->mutex);
                 state->process.reset();
             }
-            emitEvent(state, onEvent, {
+            EmitEvent(state, on_event, {
                 .kind = ExecutionEventKind::Finished,
-                .jobId = request.jobId,
-                .executorId = target.executorId,
-                .targetId = target.id,
+                .job_id = request.job_id,
+                .executor_id = target.executor_id,
+                .target_id = target.id,
                 .progress = 1.0,
-                .exitCode = exitCode,
+                .exit_code = exit_code,
             });
         });
 
@@ -241,15 +232,15 @@ public:
 ExecutionHandle::ExecutionHandle(std::shared_ptr<ExecutionState> state)
     : state_(std::move(state)) {}
 
-std::uint64_t ExecutionHandle::id() const {
+std::uint64_t ExecutionHandle::Id() const {
     return state_ == nullptr ? 0 : state_->id;
 }
 
-JobId ExecutionHandle::jobId() const {
-    return state_ == nullptr ? 0 : state_->jobId;
+JobId ExecutionHandle::JobIdValue() const {
+    return state_ == nullptr ? 0 : state_->job_id;
 }
 
-ExecutionStatus ExecutionHandle::status() const {
+ExecutionStatus ExecutionHandle::Status() const {
     if (state_ == nullptr) {
         return ExecutionStatus::Failed;
     }
@@ -257,28 +248,28 @@ ExecutionStatus ExecutionHandle::status() const {
     return state_->status;
 }
 
-bool ExecutionHandle::running() const {
-    const ExecutionStatus current = status();
+bool ExecutionHandle::Running() const {
+    const ExecutionStatus current = Status();
     return current == ExecutionStatus::Pending || current == ExecutionStatus::Running;
 }
 
-void ExecutionHandle::cancel() {
+void ExecutionHandle::Cancel() {
     if (state_ == nullptr) {
         return;
     }
     std::lock_guard<std::mutex> lock(state_->mutex);
-    state_->cancelRequested = true;
+    state_->cancel_requested = true;
     if (state_->status == ExecutionStatus::Pending || state_->status == ExecutionStatus::Running) {
         state_->status = ExecutionStatus::Cancelled;
     }
     if (state_->process != nullptr) {
-        state_->process->terminate();
+        state_->process->Terminate();
     }
 }
 
-ExecutionResult ExecutionHandle::wait() {
+ExecutionResult ExecutionHandle::Wait() {
     if (state_ == nullptr) {
-        return {.exitCode = -1, .output = "Execution handle is not valid\n"};
+        return {.exit_code = -1, .output = "Execution handle is not valid\n"};
     }
     if (state_->worker.joinable() && std::this_thread::get_id() != state_->worker.get_id()) {
         state_->worker.join();
@@ -290,7 +281,7 @@ ExecutionResult ExecutionHandle::wait() {
     return *state_->result;
 }
 
-std::optional<ExecutionResult> ExecutionHandle::result() const {
+std::optional<ExecutionResult> ExecutionHandle::ResultValue() const {
     if (state_ == nullptr) {
         return std::nullopt;
     }
@@ -298,7 +289,7 @@ std::optional<ExecutionResult> ExecutionHandle::result() const {
     return state_->result;
 }
 
-std::vector<ExecutionEvent> ExecutionHandle::events() const {
+std::vector<ExecutionEvent> ExecutionHandle::EventsValue() const {
     if (state_ == nullptr) {
         return {};
     }
@@ -306,30 +297,34 @@ std::vector<ExecutionEvent> ExecutionHandle::events() const {
     return state_->events;
 }
 
-bool ExecutionHandle::valid() const {
+bool ExecutionHandle::Valid() const {
     return state_ != nullptr;
 }
 
-ExecutionResult ExecutionProvider::execute(
+ExecutionResult ExecutionProvider::Execute(
     WorkspaceContext& context,
     const ExecutionRequest& request,
     const ExecutionTarget& target,
-    ExecutionEventCallback onEvent) const {
-    return start(context, request, target, std::move(onEvent)).wait();
+    ExecutionEventCallback on_event) const {
+    return Start(context, request, target, std::move(on_event)).Wait();
 }
 
-void ExecutionService::addProvider(std::unique_ptr<ExecutionProvider> provider) {
-    if (provider == nullptr || provider->id().empty()) {
-        return;
+RegistrationHandle ExecutionService::RegisterProvider(std::unique_ptr<ExecutionProvider> provider) {
+    if (provider == nullptr || provider->Id().empty()) {
+        return {};
     }
-    providers_[provider->id()] = std::move(provider);
+    const std::string provider_id = provider->Id();
+    providers_[provider_id] = std::move(provider);
+    return RegistrationHandle([this, provider_id] {
+        RemoveProvider(provider_id);
+    });
 }
 
-void ExecutionService::removeProvider(const std::string& providerId) {
-    providers_.erase(providerId);
+void ExecutionService::RemoveProvider(const std::string& provider_id) {
+    providers_.erase(provider_id);
 }
 
-std::vector<std::string> ExecutionService::providerIds() const {
+std::vector<std::string> ExecutionService::ProviderIds() const {
     std::vector<std::string> ids;
     for (const auto& [id, provider] : providers_) {
         (void)provider;
@@ -338,62 +333,109 @@ std::vector<std::string> ExecutionService::providerIds() const {
     return ids;
 }
 
-std::vector<ExecutionTarget> ExecutionService::targets(WorkspaceContext& context) const {
+std::vector<ExecutionTarget> ExecutionService::Targets(WorkspaceContext& context) const {
     std::vector<ExecutionTarget> values;
     for (const auto& [id, provider] : providers_) {
         (void)id;
-        std::vector<ExecutionTarget> provided = provider->targets(context);
+        std::vector<ExecutionTarget> provided = provider->Targets(context);
         values.insert(values.end(), provided.begin(), provided.end());
     }
     return values;
 }
 
-ExecutionResult ExecutionService::execute(
+ExecutionResult ExecutionService::Execute(
     WorkspaceContext& context,
     const ExecutionRequest& request,
     const ExecutionTarget& target,
-    ExecutionEventCallback onEvent) const {
-    return start(context, request, target, std::move(onEvent)).wait();
+    ExecutionEventCallback on_event) const {
+    return Start(context, request, target, std::move(on_event)).Wait();
 }
 
-ExecutionHandle ExecutionService::start(
+ExecutionHandle ExecutionService::Start(
     WorkspaceContext& context,
     const ExecutionRequest& request,
     const ExecutionTarget& target,
-    ExecutionEventCallback onEvent) const {
-    const ExecutionProvider* provider = providerFor(request, target);
+    ExecutionEventCallback on_event) const {
+    const ExecutionProvider* provider = ProviderFor(request, target);
     if (provider == nullptr) {
         ExecutionEvent event{
             .kind = ExecutionEventKind::Finished,
-            .jobId = request.jobId,
-            .executorId = target.executorId,
-            .targetId = target.id,
+            .job_id = request.job_id,
+            .executor_id = target.executor_id,
+            .target_id = target.id,
             .text = "Execution provider not found\n",
             .progress = 1.0,
-            .exitCode = -1,
+            .exit_code = -1,
         };
         ExecutionResult result{
-            .exitCode = -1,
+            .exit_code = -1,
             .output = "Execution provider not found\n",
-            .jobId = request.jobId,
+            .job_id = request.job_id,
             .events = {event},
         };
-        return completedHandle(std::move(result), ExecutionStatus::Failed, std::move(onEvent));
+        return CompletedHandle(std::move(result), ExecutionStatus::Failed, std::move(on_event));
     }
-    return provider->start(context, request, target, std::move(onEvent));
+    return provider->Start(context, request, target, std::move(on_event));
 }
 
-const ExecutionProvider* ExecutionService::providerFor(const ExecutionRequest& request, const ExecutionTarget& target) const {
+const ExecutionProvider* ExecutionService::ProviderFor(const ExecutionRequest& request, const ExecutionTarget& target) const {
     (void)request;
-    auto it = providers_.find(target.executorId);
+    auto it = providers_.find(target.executor_id);
     return it == providers_.end() ? nullptr : it->second.get();
 }
 
-void registerDefaultExecutionProviders(ExecutionService& service) {
-    service.addProvider(std::make_unique<LocalExecutionProvider>());
+void RegisterDefaultExecutionProviders(ExecutionService& service) {
+    service.RegisterProvider(std::make_unique<LocalExecutionProvider>());
 }
 
-std::string toString(ExecutionStatus status) {
+void ApplyExecutionEventToJob(JobService& jobs, const ExecutionEvent& event) {
+    if (event.job_id == 0) {
+        return;
+    }
+    switch (event.kind) {
+    case ExecutionEventKind::Started:
+        jobs.MarkRunning(event.job_id);
+        if (event.progress >= 0.0) {
+            jobs.UpdateProgress(event.job_id, event.progress);
+        }
+        return;
+    case ExecutionEventKind::Stdout:
+    case ExecutionEventKind::Stderr:
+        jobs.AppendOutput(event.job_id, event.text);
+        return;
+    case ExecutionEventKind::Progress:
+        jobs.UpdateProgress(event.job_id, event.progress, event.text);
+        return;
+    case ExecutionEventKind::Finished:
+        if (!event.text.empty()) {
+            jobs.AppendOutput(event.job_id, event.text);
+        }
+        if (jobs.CancellationRequested(event.job_id)) {
+            jobs.Cancel(event.job_id, "Job cancelled");
+        } else {
+            jobs.Complete(event.job_id, event.exit_code == 0);
+        }
+        return;
+    }
+}
+
+std::string ToString(ExecutionTargetKind kind) {
+    switch (kind) {
+    case ExecutionTargetKind::Local:
+        return "local";
+    case ExecutionTargetKind::Device:
+        return "device";
+    case ExecutionTargetKind::Remote:
+        return "remote";
+    case ExecutionTargetKind::Container:
+        return "container";
+    case ExecutionTargetKind::Custom:
+        return "custom";
+    }
+    return "custom";
+}
+
+std::string ToString(ExecutionStatus status) {
     switch (status) {
     case ExecutionStatus::Pending:
         return "pending";
@@ -407,25 +449,6 @@ std::string toString(ExecutionStatus status) {
         return "cancelled";
     }
     return "pending";
-}
-
-Json toJson(const ExecutionTarget& target) {
-    return Json::object({
-        {"id", Json(target.id)},
-        {"executorId", Json(target.executorId)},
-        {"name", Json(target.name)},
-        {"capabilities", stringArrayToJson(target.capabilities)},
-        {"metadata", target.metadata},
-    });
-}
-
-Json toJson(const ExecutionResult& result) {
-    return Json::object({
-        {"exitCode", Json(static_cast<std::int64_t>(result.exitCode))},
-        {"output", Json(result.output)},
-        {"jobId", Json(static_cast<std::int64_t>(result.jobId))},
-        {"events", toJson(result.events)},
-    });
 }
 
 }

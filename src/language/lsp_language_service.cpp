@@ -2,181 +2,180 @@
 
 #include <utility>
 
+#include "vanta/core/json_codec.h"
+
 namespace vanta {
 namespace {
 
-std::string lspUriForFile(const VirtualFile& file) {
-    return file.toUri().string();
+std::string LspUriForFile(const VirtualFile& file) {
+    return file.ToUri().ToString();
 }
 
-LanguageRequestTrace traceFromLsp(const LspRequestResult& result) {
+LanguageRequestTrace TraceFromLsp(const LspRequestResult& result) {
     return {
         .id = result.id,
         .method = result.method,
-        .rawRequest = result.rawRequest,
-        .rawResponse = result.rawResponse,
+        .raw_request = result.raw_request,
+        .raw_response = result.raw_response,
     };
 }
 
-Json parseRawResponse(const LspRequestResult& result) {
-    if (result.rawResponse.empty()) {
-        return Json(nullptr);
+Value ParseRawResponse(const LspRequestResult& result) {
+    if (result.raw_response.empty()) {
+        return Value(nullptr);
     }
-    try {
-        return Json::parse(result.rawResponse);
-    } catch (const JsonError&) {
-        return Json(result.rawResponse);
-    }
+    Result<Value> parsed = ValueFromJsonText(result.raw_response);
+    return parsed ? parsed.Value() : Value(result.raw_response);
 }
 
-const Json& lspResultValue(const Json& payload) {
-    if (payload.isObject() && payload.contains("result")) {
+const Value& LspResultValue(const Value& payload) {
+    if (payload.IsObject() && payload.Contains("result")) {
         return payload["result"];
     }
     return payload;
 }
 
-TextPosition positionFromLsp(const Json& value) {
+TextPosition PositionFromLsp(const Value& value) {
     TextPosition position;
-    if (value.isObject()) {
-        if (value.contains("line") && value["line"].isInt()) {
-            position.line = static_cast<int>(value["line"].asInt());
+    if (value.IsObject()) {
+        if (value.Contains("line") && value["line"].IsInt()) {
+            position.line = static_cast<int>(value["line"].AsInt());
         }
-        if (value.contains("character") && value["character"].isInt()) {
-            position.character = static_cast<int>(value["character"].asInt());
+        if (value.Contains("character") && value["character"].IsInt()) {
+            position.character = static_cast<int>(value["character"].AsInt());
         }
     }
     return position;
 }
 
-TextRange rangeFromLsp(const Json& value) {
+TextRange RangeFromLsp(const Value& value) {
     TextRange range;
-    if (value.isObject()) {
-        range.start = positionFromLsp(value["start"]);
-        range.end = positionFromLsp(value["end"]);
+    if (value.IsObject()) {
+        range.start = PositionFromLsp(value["start"]);
+        range.end = PositionFromLsp(value["end"]);
     }
     return range;
 }
 
-std::string markedStringValue(const Json& value) {
-    if (value.isString()) {
-        return value.asString();
+std::string MarkedStringValue(const Value& value) {
+    if (value.IsString()) {
+        return value.AsString();
     }
-    if (value.isObject()) {
-        if (auto text = value.stringValue("value")) {
+    if (value.IsObject()) {
+        if (auto text = value.StringValue("value")) {
             return *text;
         }
-        if (auto text = value.stringValue("language")) {
+        if (auto text = value.StringValue("language")) {
             return *text;
         }
     }
-    return value.isNull() ? "" : value.dump();
+    return value.IsNull() ? "" : ValueToJsonText(value);
 }
 
-std::string documentationFromLsp(const Json& item) {
-    if (!item.isObject() || !item.contains("documentation")) {
+std::string DocumentationFromLsp(const Value& item) {
+    if (!item.IsObject() || !item.Contains("documentation")) {
         return "";
     }
-    return markedStringValue(item["documentation"]);
+    return MarkedStringValue(item["documentation"]);
 }
 
-CompletionItem completionItemFromLsp(const Json& item) {
+CompletionItem CompletionItemFromLsp(const Value& item) {
     CompletionItem completion;
-    if (!item.isObject()) {
+    if (!item.IsObject()) {
         return completion;
     }
-    completion.label = item.stringValue("label").value_or("");
-    completion.insertText = item.stringValue("insertText").value_or(completion.label);
-    completion.detail = item.stringValue("detail").value_or("");
-    completion.documentation = documentationFromLsp(item);
+    completion.label = item.StringValue("label").value_or("");
+    completion.insert_text = item.StringValue("insertText").value_or(completion.label);
+    completion.detail = item.StringValue("detail").value_or("");
+    completion.documentation = DocumentationFromLsp(item);
     return completion;
 }
 
-void appendLspLocation(const Json& value, std::vector<Location>& locations) {
-    if (!value.isObject()) {
+void AppendLspLocation(const Value& value, std::vector<Location>& locations) {
+    if (!value.IsObject()) {
         return;
     }
-    const std::string uri = value.stringValue("uri").value_or(value.stringValue("targetUri").value_or(""));
+    const std::string uri = value.StringValue("uri").value_or(value.StringValue("targetUri").value_or(""));
     if (uri.empty()) {
         return;
     }
-    const Json& rangeJson = value.contains("range") ? value["range"] : value["targetSelectionRange"];
+    const Value& range_json = value.Contains("range") ? value["range"] : value["targetSelectionRange"];
     locations.push_back({
-        .file = VirtualFile(Uri::parse(uri), nullptr),
-        .range = rangeFromLsp(rangeJson),
+        .file = VirtualFile(Uri::Parse(uri), nullptr),
+        .range = RangeFromLsp(range_json),
     });
 }
 
-CompletionList completionFromLsp(const LspRequestResult& result) {
+CompletionList CompletionFromLsp(const LspRequestResult& result) {
     CompletionList completion;
-    completion.trace = traceFromLsp(result);
-    completion.raw = parseRawResponse(result);
-    completion.ok = !result.timedOut;
-    completion.error = result.timedOut ? "Language server request timed out" : "";
-    const Json& value = lspResultValue(completion.raw);
-    const Json* items = nullptr;
-    if (value.isArray()) {
+    completion.trace = TraceFromLsp(result);
+    const Value raw = ParseRawResponse(result);
+    completion.ok = !result.timed_out;
+    completion.error = result.timed_out ? "Language server request timed out" : "";
+    const Value& value = LspResultValue(raw);
+    const Value* items = nullptr;
+    if (value.IsArray()) {
         items = &value;
-    } else if (value.isObject()) {
-        completion.incomplete = value.contains("isIncomplete") && value["isIncomplete"].isBool() && value["isIncomplete"].asBool();
-        if (value.contains("items") && value["items"].isArray()) {
+    } else if (value.IsObject()) {
+        completion.incomplete = value.Contains("isIncomplete") && value["isIncomplete"].IsBool() && value["isIncomplete"].AsBool();
+        if (value.Contains("items") && value["items"].IsArray()) {
             items = &value["items"];
         }
     }
     if (items != nullptr) {
-        for (const Json& item : items->asArray()) {
-            CompletionItem completionItem = completionItemFromLsp(item);
-            if (!completionItem.label.empty()) {
-                completion.items.push_back(std::move(completionItem));
+        for (const Value& item : items->AsArray()) {
+            CompletionItem completion_item = CompletionItemFromLsp(item);
+            if (!completion_item.label.empty()) {
+                completion.items.push_back(std::move(completion_item));
             }
         }
     }
     return completion;
 }
 
-HoverResult hoverFromLsp(const LspRequestResult& result) {
+HoverResult HoverFromLsp(const LspRequestResult& result) {
     HoverResult hover;
-    hover.trace = traceFromLsp(result);
-    hover.raw = parseRawResponse(result);
-    hover.ok = !result.timedOut;
-    hover.error = result.timedOut ? "Language server request timed out" : "";
-    const Json& value = lspResultValue(hover.raw);
-    if (value.isObject() && value.contains("contents")) {
-        hover.contents = markedStringValue(value["contents"]);
+    hover.trace = TraceFromLsp(result);
+    const Value raw = ParseRawResponse(result);
+    hover.ok = !result.timed_out;
+    hover.error = result.timed_out ? "Language server request timed out" : "";
+    const Value& value = LspResultValue(raw);
+    if (value.IsObject() && value.Contains("contents")) {
+        hover.contents = MarkedStringValue(value["contents"]);
     } else {
-        hover.contents = markedStringValue(value);
+        hover.contents = MarkedStringValue(value);
     }
     return hover;
 }
 
-LocationResult definitionFromLsp(const LspRequestResult& result) {
+LocationResult DefinitionFromLsp(const LspRequestResult& result) {
     LocationResult definition;
-    definition.trace = traceFromLsp(result);
-    definition.raw = parseRawResponse(result);
-    definition.ok = !result.timedOut;
-    definition.error = result.timedOut ? "Language server request timed out" : "";
-    const Json& value = lspResultValue(definition.raw);
-    if (value.isArray()) {
-        for (const Json& item : value.asArray()) {
-            appendLspLocation(item, definition.locations);
+    definition.trace = TraceFromLsp(result);
+    const Value raw = ParseRawResponse(result);
+    definition.ok = !result.timed_out;
+    definition.error = result.timed_out ? "Language server request timed out" : "";
+    const Value& value = LspResultValue(raw);
+    if (value.IsArray()) {
+        for (const Value& item : value.AsArray()) {
+            AppendLspLocation(item, definition.locations);
         }
     } else {
-        appendLspLocation(value, definition.locations);
+        AppendLspLocation(value, definition.locations);
     }
     return definition;
 }
 
-SemanticTokens semanticTokensFromLsp(const LspRequestResult& result) {
+SemanticTokens SemanticTokensFromLsp(const LspRequestResult& result) {
     SemanticTokens tokens;
-    tokens.trace = traceFromLsp(result);
-    tokens.raw = parseRawResponse(result);
-    tokens.ok = !result.timedOut;
-    tokens.error = result.timedOut ? "Language server request timed out" : "";
-    const Json& value = lspResultValue(tokens.raw);
-    if (value.isObject() && value.contains("data") && value["data"].isArray()) {
-        for (const Json& item : value["data"].asArray()) {
-            if (item.isInt()) {
-                tokens.data.push_back(item.asInt());
+    tokens.trace = TraceFromLsp(result);
+    const Value raw = ParseRawResponse(result);
+    tokens.ok = !result.timed_out;
+    tokens.error = result.timed_out ? "Language server request timed out" : "";
+    const Value& value = LspResultValue(raw);
+    if (value.IsObject() && value.Contains("data") && value["data"].IsArray()) {
+        for (const Value& item : value["data"].AsArray()) {
+            if (item.IsInt()) {
+                tokens.data.push_back(item.AsInt());
             }
         }
     }
@@ -185,79 +184,79 @@ SemanticTokens semanticTokensFromLsp(const LspRequestResult& result) {
 
 }
 
-LspLanguageService::LspLanguageService(std::filesystem::path serverPath, std::filesystem::path workspaceRoot)
-    : serverPath_(std::move(serverPath)), workspaceRoot_(std::move(workspaceRoot)) {}
+LspLanguageService::LspLanguageService(std::filesystem::path server_path, std::filesystem::path workspace_root)
+    : server_path_(std::move(server_path)), workspace_root_(std::move(workspace_root)) {}
 
-bool LspLanguageService::start(std::string* errorMessage) {
-    if (serverPath_.empty()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "language server path is not configured";
+bool LspLanguageService::Start(std::string* error_message) {
+    if (server_path_.empty()) {
+        if (error_message != nullptr) {
+            *error_message = "language server path is not configured";
         }
         return false;
     }
-    if (!client_.start(serverPath_, workspaceRoot_, errorMessage)) {
+    if (!client_.Start(server_path_, workspace_root_, error_message)) {
         return false;
     }
-    client_.initialize(workspaceRoot_);
+    client_.Initialize(workspace_root_);
     return true;
 }
 
-bool LspLanguageService::running() const {
-    return client_.running();
+bool LspLanguageService::Running() const {
+    return client_.Running();
 }
 
-void LspLanguageService::stop() {
-    client_.stop();
+void LspLanguageService::Stop() {
+    client_.Stop();
 }
 
-void LspLanguageService::didOpen(const TextDocument& document) {
-    Json::Object textDocument;
-    textDocument["uri"] = Json(lspUriForFile(document.file));
-    textDocument["languageId"] = Json("cpp");
-    textDocument["version"] = Json(static_cast<std::int64_t>(document.version));
-    textDocument["text"] = Json(document.text);
-    client_.notify("textDocument/didOpen", Json::object({{"textDocument", Json::object(std::move(textDocument))}}));
+void LspLanguageService::DidOpen(const TextDocument& document) {
+    Value::Object text_document;
+    text_document["uri"] = Value(LspUriForFile(document.file));
+    text_document["languageId"] = Value("cpp");
+    text_document["version"] = Value(static_cast<std::int64_t>(document.version));
+    text_document["text"] = Value(document.text);
+    client_.Notify("text_document/didOpen", Value::ObjectValue({{"textDocument", Value::ObjectValue(std::move(text_document))}}));
 }
 
-void LspLanguageService::didChange(const TextDocument& document) {
-    Json::Object textDocument;
-    textDocument["uri"] = Json(lspUriForFile(document.file));
-    textDocument["version"] = Json(static_cast<std::int64_t>(document.version));
-    Json::Array changes;
-    changes.push_back(Json::object({{"text", Json(document.text)}}));
-    client_.notify("textDocument/didChange", Json::object({
-        {"textDocument", Json::object(std::move(textDocument))},
-        {"contentChanges", Json::array(std::move(changes))},
+void LspLanguageService::DidChange(const TextDocument& document) {
+    Value::Object text_document;
+    text_document["uri"] = Value(LspUriForFile(document.file));
+    text_document["version"] = Value(static_cast<std::int64_t>(document.version));
+    Value::Array changes;
+    changes.push_back(Value::ObjectValue({{"text", Value(document.text)}}));
+    client_.Notify("text_document/didChange", Value::ObjectValue({
+        {"textDocument", Value::ObjectValue(std::move(text_document))},
+        {"contentChanges", Value::ArrayValue(std::move(changes))},
     }));
 }
 
-void LspLanguageService::didSave(const TextDocument& document) {
-    client_.notify("textDocument/didSave", Json::object({
-        {"textDocument", Json::object({{"uri", Json(lspUriForFile(document.file))}})},
-        {"text", Json(document.text)},
+void LspLanguageService::DidSave(const TextDocument& document) {
+    client_.Notify("text_document/didSave", Value::ObjectValue({
+        {"textDocument", Value::ObjectValue({{"uri", Value(LspUriForFile(document.file))}})},
+        {"text", Value(document.text)},
     }));
 }
 
-void LspLanguageService::didClose(const VirtualFile& file) {
-    client_.notify("textDocument/didClose", Json::object({
-        {"textDocument", Json::object({{"uri", Json(lspUriForFile(file))}})},
+void LspLanguageService::DidClose(const VirtualFile& file) {
+    client_.Notify("text_document/didClose", Value::ObjectValue({
+        {"textDocument", Value::ObjectValue({{"uri", Value(LspUriForFile(file))}})},
     }));
 }
 
-CompletionList LspLanguageService::completion(const TextDocumentPosition& request) {
-    return completionFromLsp(client_.completion(request.document.file.toUri(), request.position));
+CompletionList LspLanguageService::Completion(const TextDocumentPosition& request) {
+    return CompletionFromLsp(client_.Completion(request.document.file.ToUri(), request.position));
 }
 
-HoverResult LspLanguageService::hover(const TextDocumentPosition& request) {
-    return hoverFromLsp(client_.hover(request.document.file.toUri(), request.position));
+HoverResult LspLanguageService::Hover(const TextDocumentPosition& request) {
+    return HoverFromLsp(client_.Hover(request.document.file.ToUri(), request.position));
 }
 
-LocationResult LspLanguageService::definition(const TextDocumentPosition& request) {
-    return definitionFromLsp(client_.definition(request.document.file.toUri(), request.position));
+LocationResult LspLanguageService::Definition(const TextDocumentPosition& request) {
+    return DefinitionFromLsp(client_.Definition(request.document.file.ToUri(), request.position));
 }
 
-SemanticTokens LspLanguageService::semanticTokensFull(const TextDocumentIdentifier& document) {
-    return semanticTokensFromLsp(client_.semanticTokensFull(document.file.toUri()));
+SemanticTokens LspLanguageService::SemanticTokensFull(const TextDocumentIdentifier& document) {
+    return SemanticTokensFromLsp(client_.SemanticTokensFull(document.file.ToUri()));
 }
 
 }

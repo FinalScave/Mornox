@@ -14,11 +14,11 @@ public:
     RegistrationHandle& operator=(RegistrationHandle&& other) noexcept;
     ~RegistrationHandle();
 
-    void unregister() noexcept;
-    bool registered() const noexcept;
+    void Unregister() noexcept;
+    bool Registered() const noexcept;
 
 private:
-    std::function<void()> unregister_;
+    std::function<void()> unregister_callback_;
     bool registered_ = false;
 };
 

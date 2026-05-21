@@ -4,11 +4,11 @@ namespace vanta {
 
 Uri::Uri(std::string value) : value_(std::move(value)) {}
 
-Uri Uri::parse(std::string value) {
+Uri Uri::Parse(std::string value) {
     return Uri(std::move(value));
 }
 
-Uri Uri::fromLocalPath(const std::filesystem::path& path) {
+Uri Uri::FromLocalPath(const std::filesystem::path& path) {
     std::string normalized = std::filesystem::absolute(path).lexically_normal().string();
     std::string value = "file://";
     for (char ch : normalized) {
@@ -21,22 +21,22 @@ Uri Uri::fromLocalPath(const std::filesystem::path& path) {
     return Uri(std::move(value));
 }
 
-bool Uri::empty() const noexcept {
+bool Uri::Empty() const noexcept {
     return value_.empty();
 }
 
-const std::string& Uri::string() const noexcept {
+const std::string& Uri::ToString() const noexcept {
     return value_;
 }
 
-std::string Uri::scheme() const {
+std::string Uri::Scheme() const {
     const std::size_t separator = value_.find(':');
     return separator == std::string::npos ? "" : value_.substr(0, separator);
 }
 
-std::string Uri::path() const {
-    const std::string currentScheme = scheme();
-    if (currentScheme == "file" && value_.rfind("file://", 0) == 0) {
+std::string Uri::Path() const {
+    const std::string current_scheme = Scheme();
+    if (current_scheme == "file" && value_.rfind("file://", 0) == 0) {
         std::string result = value_.substr(7);
         std::string decoded;
         for (std::size_t i = 0; i < result.size(); ++i) {
@@ -53,12 +53,12 @@ std::string Uri::path() const {
     return separator == std::string::npos ? value_ : value_.substr(separator + 1);
 }
 
-std::string Uri::filename() const {
-    return std::filesystem::path(path()).filename().string();
+std::string Uri::Filename() const {
+    return std::filesystem::path(Path()).filename().string();
 }
 
-std::string Uri::extension() const {
-    return std::filesystem::path(path()).extension().string();
+std::string Uri::Extension() const {
+    return std::filesystem::path(Path()).extension().string();
 }
 
 bool Uri::operator==(const Uri& other) const noexcept {

@@ -25,6 +25,6 @@ struct Diagnostic {
     std::string source;
 };
 
-std::string toString(DiagnosticSeverity severity);
+std::string ToString(DiagnosticSeverity severity);
 
 }

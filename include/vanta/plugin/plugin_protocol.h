@@ -3,42 +3,53 @@
 #include <optional>
 #include <string>
 
-#include "vanta/platform/json.h"
+#include "vanta/core/value.h"
 
 namespace vanta {
 
 struct PluginRpcRequest {
     int id = 0;
     std::string method;
-    Json params;
+    std::string params_json = "{}";
 };
 
 struct PluginRpcResponse {
     int id = 0;
     bool ok = false;
-    Json result;
+    std::string result_json = "{}";
     std::string error;
 };
 
 enum class PluginRegistrationKind {
     Command,
+    View,
+    Menu,
     AgentTool,
+    AgentContextProvider,
     BuildProvider,
     LanguageService,
+    FileSystemProvider,
+    RunConfiguration,
+    DiagnosticProvider,
+    ModelProvider,
+    DebugProvider,
+    Component,
 };
 
 struct PluginRegistration {
     PluginRegistrationKind kind = PluginRegistrationKind::Command;
     std::string id;
     std::string title;
-    Json metadata;
+    std::string plugin_id;
+    bool metadata_only = false;
+    Value metadata = Value::ObjectValue();
 };
 
-Json toJson(const PluginRpcRequest& request);
-Json toJson(const PluginRpcResponse& response);
-Json toJson(const PluginRegistration& registration);
-std::optional<PluginRpcResponse> parsePluginRpcResponse(const Json& json);
-std::optional<PluginRegistration> parsePluginRegistration(const Json& json);
-std::string toString(PluginRegistrationKind kind);
+std::optional<PluginRpcResponse> ParsePluginRpcResponse(const Value& json);
+std::optional<PluginRpcResponse> ParsePluginRpcResponseText(const std::string& json_text);
+std::optional<PluginRegistration> ParsePluginRegistration(const Value& json);
+std::string FormatPluginRpcRequestText(const PluginRpcRequest& request);
+std::string FormatPluginRpcResponseText(const PluginRpcResponse& response);
+std::string ToString(PluginRegistrationKind kind);
 
 }

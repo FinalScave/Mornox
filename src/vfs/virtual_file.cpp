@@ -7,72 +7,72 @@ namespace vanta {
 VirtualFile::VirtualFile(Uri uri, const VirtualFileSystem* vfs)
     : uri_(std::move(uri)), vfs_(vfs) {}
 
-bool VirtualFile::valid() const noexcept {
-    return vfs_ != nullptr && !uri_.empty();
+bool VirtualFile::Valid() const noexcept {
+    return vfs_ != nullptr && !uri_.Empty();
 }
 
-const Uri& VirtualFile::uri() const noexcept {
+const Uri& VirtualFile::UriValue() const noexcept {
     return uri_;
 }
 
-Uri VirtualFile::toUri() const {
+Uri VirtualFile::ToUri() const {
     return uri_;
 }
 
-std::string VirtualFile::displayName() const {
-    return uri_.filename();
+std::string VirtualFile::DisplayName() const {
+    return uri_.Filename();
 }
 
-std::string VirtualFile::extension() const {
-    return uri_.extension();
+std::string VirtualFile::Extension() const {
+    return uri_.Extension();
 }
 
-bool VirtualFile::exists() const {
-    return valid() && vfs_->exists(uri_);
+bool VirtualFile::Exists() const {
+    return Valid() && vfs_->Exists(uri_);
 }
 
-FileStat VirtualFile::stat() const {
-    return valid() ? vfs_->stat(uri_) : FileStat{};
+FileStat VirtualFile::Stat() const {
+    return Valid() ? vfs_->Stat(uri_) : FileStat{};
 }
 
-std::optional<VirtualFile> VirtualFile::parent() const {
-    if (!valid()) {
+std::optional<VirtualFile> VirtualFile::Parent() const {
+    if (!Valid()) {
         return std::nullopt;
     }
-    auto parentUri = vfs_->parent(uri_);
-    if (!parentUri) {
+    auto parent_uri = vfs_->Parent(uri_);
+    if (!parent_uri) {
         return std::nullopt;
     }
-    return vfs_->file(*parentUri);
+    return vfs_->File(*parent_uri);
 }
 
-std::vector<VirtualFile> VirtualFile::listChildren() const {
+std::vector<VirtualFile> VirtualFile::ListChildren() const {
     std::vector<VirtualFile> result;
-    if (!valid()) {
+    if (!Valid()) {
         return result;
     }
-    for (const Uri& child : vfs_->listChildren(uri_)) {
-        result.push_back(vfs_->file(child));
+    for (const Uri& child : vfs_->ListChildren(uri_)) {
+        result.push_back(vfs_->File(child));
     }
     return result;
 }
 
-std::optional<std::string> VirtualFile::readText() const {
-    return valid() ? vfs_->readText(uri_) : std::nullopt;
+std::optional<std::string> VirtualFile::ReadText() const {
+    return Valid() ? vfs_->ReadText(uri_) : std::nullopt;
 }
 
-bool VirtualFile::writeText(const std::string& text, std::string* errorMessage) const {
-    if (!valid()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Virtual file is not valid";
+bool VirtualFile::WriteText(const std::string& text, std::string* error_message) const {
+    if (!Valid()) {
+        if (error_message != nullptr) {
+            *error_message = "Virtual file is not valid";
         }
         return false;
     }
-    return vfs_->writeText(uri_, text, errorMessage);
+    return vfs_->WriteText(uri_, text, error_message);
 }
 
-std::optional<std::filesystem::path> VirtualFile::localPath() const {
-    return valid() ? vfs_->localPath(uri_) : std::nullopt;
+std::optional<std::filesystem::path> VirtualFile::LocalPath() const {
+    return Valid() ? vfs_->LocalPath(uri_) : std::nullopt;
 }
 
 bool VirtualFile::operator==(const VirtualFile& other) const noexcept {

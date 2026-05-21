@@ -2,55 +2,55 @@
 
 namespace vanta {
 
-DocumentLanguageSynchronizer::DocumentLanguageSynchronizer(DocumentService& documents, DefaultLanguageRegistry& languages)
+DocumentLanguageSynchronizer::DocumentLanguageSynchronizer(DocumentService& documents, LanguageRegistry& languages)
     : documents_(documents), languages_(languages) {}
 
 DocumentLanguageSynchronizer::~DocumentLanguageSynchronizer() {
-    stop();
+    Stop();
 }
 
-void DocumentLanguageSynchronizer::start() {
-    if (listenerId_ != 0) {
+void DocumentLanguageSynchronizer::Start() {
+    if (listener_id_ != 0) {
         return;
     }
-    listenerId_ = documents_.onDidChangeDocument([this](const DocumentChangeEvent& event) {
-        handleChange(event);
+    listener_id_ = documents_.OnDidChangeDocument([this](const DocumentChangeEvent& event) {
+        HandleChange(event);
     });
 }
 
-void DocumentLanguageSynchronizer::stop() {
-    if (listenerId_ == 0) {
+void DocumentLanguageSynchronizer::Stop() {
+    if (listener_id_ == 0) {
         return;
     }
-    documents_.removeDocumentListener(listenerId_);
-    listenerId_ = 0;
+    documents_.RemoveDocumentListener(listener_id_);
+    listener_id_ = 0;
 }
 
-void DocumentLanguageSynchronizer::handleChange(const DocumentChangeEvent& event) {
-    LanguageService* service = languages_.serviceForDocument(event.file);
+void DocumentLanguageSynchronizer::HandleChange(const DocumentChangeEvent& event) {
+    LanguageService* service = languages_.ServiceForDocument(event.file);
     if (service == nullptr) {
         return;
     }
 
     if (event.kind == DocumentChangeKind::Closed) {
-        service->didClose(event.file);
+        service->DidClose(event.file);
         return;
     }
 
-    auto snapshot = documents_.snapshot(event.file);
+    auto snapshot = documents_.Snapshot(event.file);
     if (!snapshot) {
         return;
     }
 
     switch (event.kind) {
     case DocumentChangeKind::Opened:
-        service->didOpen(*snapshot);
+        service->DidOpen(*snapshot);
         break;
     case DocumentChangeKind::Changed:
-        service->didChange(*snapshot);
+        service->DidChange(*snapshot);
         break;
     case DocumentChangeKind::Saved:
-        service->didSave(*snapshot);
+        service->DidSave(*snapshot);
         break;
     case DocumentChangeKind::Closed:
         break;

@@ -9,22 +9,22 @@ namespace vanta {
 
 class Project {
 public:
-    const ProjectModel& model() const;
-    void setModel(ProjectModel model);
+    const ProjectModel& Model() const;
+    void SetModel(ProjectModel model);
 
-    ComponentRegistry& components();
-    const ComponentRegistry& components() const;
-    Component* getComponent(const std::string& id);
-    const Component* getComponent(const std::string& id) const;
+    ComponentRegistry& Components();
+    const ComponentRegistry& Components() const;
+    Component* GetComponent(const std::string& id);
+    const Component* GetComponent(const std::string& id) const;
 
     template <class T>
-    T* getComponent(const std::string& id) {
-        return components_.get<T>(id);
+    T* GetComponent(const std::string& id) {
+        return components_.Get<T>(id);
     }
 
     template <class T>
-    const T* getComponent(const std::string& id) const {
-        return components_.get<T>(id);
+    const T* GetComponent(const std::string& id) const {
+        return components_.Get<T>(id);
     }
 
 private:

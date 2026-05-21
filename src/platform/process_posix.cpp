@@ -14,7 +14,7 @@
 namespace vanta {
 namespace {
 
-std::vector<char*> buildArgv(const CommandSpec& spec) {
+std::vector<char*> BuildArgv(const CommandSpec& spec) {
     std::vector<char*> argv;
     argv.reserve(spec.arguments.size() + 2);
     argv.push_back(const_cast<char*>(spec.executable.c_str()));
@@ -25,20 +25,20 @@ std::vector<char*> buildArgv(const CommandSpec& spec) {
     return argv;
 }
 
-void setCloseOnExec(int fd) {
+void SetCloseOnExec(int fd) {
     if (fd >= 0) {
         fcntl(fd, F_SETFD, FD_CLOEXEC);
     }
 }
 
-void setNonBlocking(int fd) {
+void SetNonBlocking(int fd) {
     if (fd >= 0) {
         const int flags = fcntl(fd, F_GETFL, 0);
         fcntl(fd, F_SETFL, flags | O_NONBLOCK);
     }
 }
 
-std::string readAvailable(int fd) {
+std::string ReadAvailable(int fd) {
     if (fd < 0) {
         return {};
     }
@@ -64,10 +64,10 @@ std::string readAvailable(int fd) {
 
 }
 
-CommandResult runCommand(const CommandSpec& spec, CommandCallbacks callbacks) {
-    int stdoutPipe[2] = {-1, -1};
-    int stderrPipe[2] = {-1, -1};
-    if (pipe(stdoutPipe) != 0 || pipe(stderrPipe) != 0) {
+CommandResult RunCommand(const CommandSpec& spec, CommandCallbacks callbacks) {
+    int stdout_pipe[2] = {-1, -1};
+    int stderr_pipe[2] = {-1, -1};
+    if (pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0) {
         throw std::runtime_error("Failed to create command pipes");
     }
 
@@ -77,51 +77,51 @@ CommandResult runCommand(const CommandSpec& spec, CommandCallbacks callbacks) {
     }
 
     if (pid == 0) {
-        close(stdoutPipe[0]);
-        close(stderrPipe[0]);
-        dup2(stdoutPipe[1], STDOUT_FILENO);
-        dup2(stderrPipe[1], STDERR_FILENO);
-        close(stdoutPipe[1]);
-        close(stderrPipe[1]);
+        close(stdout_pipe[0]);
+        close(stderr_pipe[0]);
+        dup2(stdout_pipe[1], STDOUT_FILENO);
+        dup2(stderr_pipe[1], STDERR_FILENO);
+        close(stdout_pipe[1]);
+        close(stderr_pipe[1]);
 
-        if (!spec.workingDirectory.empty()) {
-            chdir(spec.workingDirectory.c_str());
+        if (!spec.working_directory.empty()) {
+            chdir(spec.working_directory.c_str());
         }
 
-        std::vector<char*> argv = buildArgv(spec);
+        std::vector<char*> argv = BuildArgv(spec);
         execvp(spec.executable.c_str(), argv.data());
         _exit(127);
     }
 
-    close(stdoutPipe[1]);
-    close(stderrPipe[1]);
-    setNonBlocking(stdoutPipe[0]);
-    setNonBlocking(stderrPipe[0]);
+    close(stdout_pipe[1]);
+    close(stderr_pipe[1]);
+    SetNonBlocking(stdout_pipe[0]);
+    SetNonBlocking(stderr_pipe[0]);
 
     int status = 0;
     bool exited = false;
-    std::string stdoutText;
-    std::string stderrText;
+    std::string stdout_text;
+    std::string stderr_text;
 
-    auto drainOutput = [&] {
-        std::string stdoutChunk = readAvailable(stdoutPipe[0]);
-        if (!stdoutChunk.empty()) {
-            if (callbacks.onStdout) {
-                callbacks.onStdout(stdoutChunk);
+    auto DrainOutput = [&] {
+        std::string stdout_chunk = ReadAvailable(stdout_pipe[0]);
+        if (!stdout_chunk.empty()) {
+            if (callbacks.on_stdout) {
+                callbacks.on_stdout(stdout_chunk);
             }
-            stdoutText += std::move(stdoutChunk);
+            stdout_text += std::move(stdout_chunk);
         }
-        std::string stderrChunk = readAvailable(stderrPipe[0]);
-        if (!stderrChunk.empty()) {
-            if (callbacks.onStderr) {
-                callbacks.onStderr(stderrChunk);
+        std::string stderr_chunk = ReadAvailable(stderr_pipe[0]);
+        if (!stderr_chunk.empty()) {
+            if (callbacks.on_stderr) {
+                callbacks.on_stderr(stderr_chunk);
             }
-            stderrText += std::move(stderrChunk);
+            stderr_text += std::move(stderr_chunk);
         }
     };
 
     while (!exited) {
-        drainOutput();
+        DrainOutput();
 
         const pid_t waited = waitpid(pid, &status, WNOHANG);
         if (waited == pid) {
@@ -132,18 +132,18 @@ CommandResult runCommand(const CommandSpec& spec, CommandCallbacks callbacks) {
             usleep(10000);
         }
     }
-    drainOutput();
+    DrainOutput();
 
     CommandResult result;
-    result.standardOutput = std::move(stdoutText);
-    result.standardError = std::move(stderrText);
-    close(stdoutPipe[0]);
-    close(stderrPipe[0]);
+    result.standard_output = std::move(stdout_text);
+    result.standard_error = std::move(stderr_text);
+    close(stdout_pipe[0]);
+    close(stderr_pipe[0]);
 
     if (WIFEXITED(status)) {
-        result.exitCode = WEXITSTATUS(status);
+        result.exit_code = WEXITSTATUS(status);
     } else if (WIFSIGNALED(status)) {
-        result.exitCode = 128 + WTERMSIG(status);
+        result.exit_code = 128 + WTERMSIG(status);
     }
     return result;
 }
@@ -154,93 +154,93 @@ ChildProcess::ChildProcess(ChildProcess&& other) noexcept {
 
 ChildProcess& ChildProcess::operator=(ChildProcess&& other) noexcept {
     if (this != &other) {
-        terminate();
+        Terminate();
         pid_ = other.pid_;
-        stdinFd_ = other.stdinFd_;
-        stdoutFd_ = other.stdoutFd_;
-        stderrFd_ = other.stderrFd_;
-        exitCode_ = other.exitCode_;
+        stdin_fd_ = other.stdin_fd_;
+        stdout_fd_ = other.stdout_fd_;
+        stderr_fd_ = other.stderr_fd_;
+        exit_code_ = other.exit_code_;
         other.pid_ = -1;
-        other.stdinFd_ = -1;
-        other.stdoutFd_ = -1;
-        other.stderrFd_ = -1;
-        other.exitCode_.reset();
+        other.stdin_fd_ = -1;
+        other.stdout_fd_ = -1;
+        other.stderr_fd_ = -1;
+        other.exit_code_.reset();
     }
     return *this;
 }
 
 ChildProcess::~ChildProcess() {
-    terminate();
+    Terminate();
 }
 
-bool ChildProcess::start(const CommandSpec& spec, std::string* errorMessage) {
-    terminate();
-    exitCode_.reset();
+bool ChildProcess::Start(const CommandSpec& spec, std::string* error_message) {
+    Terminate();
+    exit_code_.reset();
 
-    int stdinPipe[2] = {-1, -1};
-    int stdoutPipe[2] = {-1, -1};
-    int stderrPipe[2] = {-1, -1};
-    if (pipe(stdinPipe) != 0 || pipe(stdoutPipe) != 0 || pipe(stderrPipe) != 0) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Failed to create process pipes";
+    int stdin_pipe[2] = {-1, -1};
+    int stdout_pipe[2] = {-1, -1};
+    int stderr_pipe[2] = {-1, -1};
+    if (pipe(stdin_pipe) != 0 || pipe(stdout_pipe) != 0 || pipe(stderr_pipe) != 0) {
+        if (error_message != nullptr) {
+            *error_message = "Failed to create process pipes";
         }
         return false;
     }
 
-    setCloseOnExec(stdinPipe[1]);
-    setCloseOnExec(stdoutPipe[0]);
-    setCloseOnExec(stderrPipe[0]);
+    SetCloseOnExec(stdin_pipe[1]);
+    SetCloseOnExec(stdout_pipe[0]);
+    SetCloseOnExec(stderr_pipe[0]);
 
     const pid_t pid = fork();
     if (pid < 0) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Failed to fork process";
+        if (error_message != nullptr) {
+            *error_message = "Failed to fork process";
         }
         return false;
     }
 
     if (pid == 0) {
-        close(stdinPipe[1]);
-        close(stdoutPipe[0]);
-        close(stderrPipe[0]);
-        dup2(stdinPipe[0], STDIN_FILENO);
-        dup2(stdoutPipe[1], STDOUT_FILENO);
-        dup2(stderrPipe[1], STDERR_FILENO);
-        close(stdinPipe[0]);
-        close(stdoutPipe[1]);
-        close(stderrPipe[1]);
+        close(stdin_pipe[1]);
+        close(stdout_pipe[0]);
+        close(stderr_pipe[0]);
+        dup2(stdin_pipe[0], STDIN_FILENO);
+        dup2(stdout_pipe[1], STDOUT_FILENO);
+        dup2(stderr_pipe[1], STDERR_FILENO);
+        close(stdin_pipe[0]);
+        close(stdout_pipe[1]);
+        close(stderr_pipe[1]);
 
-        if (!spec.workingDirectory.empty()) {
-            chdir(spec.workingDirectory.c_str());
+        if (!spec.working_directory.empty()) {
+            chdir(spec.working_directory.c_str());
         }
 
-        std::vector<char*> argv = buildArgv(spec);
+        std::vector<char*> argv = BuildArgv(spec);
         execvp(spec.executable.c_str(), argv.data());
         _exit(127);
     }
 
-    close(stdinPipe[0]);
-    close(stdoutPipe[1]);
-    close(stderrPipe[1]);
+    close(stdin_pipe[0]);
+    close(stdout_pipe[1]);
+    close(stderr_pipe[1]);
     pid_ = static_cast<int>(pid);
-    stdinFd_ = stdinPipe[1];
-    stdoutFd_ = stdoutPipe[0];
-    stderrFd_ = stderrPipe[0];
-    setNonBlocking(stdoutFd_);
-    setNonBlocking(stderrFd_);
+    stdin_fd_ = stdin_pipe[1];
+    stdout_fd_ = stdout_pipe[0];
+    stderr_fd_ = stderr_pipe[0];
+    SetNonBlocking(stdout_fd_);
+    SetNonBlocking(stderr_fd_);
     return true;
 }
 
-bool ChildProcess::running() const {
+bool ChildProcess::Running() const {
     if (pid_ < 0) {
         return false;
     }
     return kill(pid_, 0) == 0 || errno == EPERM;
 }
 
-std::optional<int> ChildProcess::tryWait() {
+std::optional<int> ChildProcess::TryWait() {
     if (pid_ < 0) {
-        return exitCode_;
+        return exit_code_;
     }
     int status = 0;
     const pid_t result = waitpid(pid_, &status, WNOHANG);
@@ -248,48 +248,48 @@ std::optional<int> ChildProcess::tryWait() {
         return std::nullopt;
     }
     if (result == pid_) {
-        rememberExitStatus(status);
+        RememberExitStatus(status);
         pid_ = -1;
-        return exitCode_;
+        return exit_code_;
     }
     if (result < 0 && errno == ECHILD) {
         pid_ = -1;
-        return exitCode_;
+        return exit_code_;
     }
     return std::nullopt;
 }
 
-int ChildProcess::wait() {
+int ChildProcess::Wait() {
     if (pid_ < 0) {
-        return exitCode_.value_or(-1);
+        return exit_code_.value_or(-1);
     }
     int status = 0;
     while (true) {
         const pid_t result = waitpid(pid_, &status, 0);
         if (result == pid_) {
-            rememberExitStatus(status);
+            RememberExitStatus(status);
             pid_ = -1;
-            return exitCode_.value_or(-1);
+            return exit_code_.value_or(-1);
         }
         if (result < 0 && errno == EINTR) {
             continue;
         }
         if (result < 0 && errno == ECHILD) {
             pid_ = -1;
-            return exitCode_.value_or(-1);
+            return exit_code_.value_or(-1);
         }
         return -1;
     }
 }
 
-bool ChildProcess::writeStdin(const std::string& text) {
-    if (stdinFd_ < 0) {
+bool ChildProcess::WriteStdin(const std::string& text) {
+    if (stdin_fd_ < 0) {
         return false;
     }
     const char* data = text.data();
     std::size_t remaining = text.size();
     while (remaining > 0) {
-        const ssize_t count = write(stdinFd_, data, remaining);
+        const ssize_t count = write(stdin_fd_, data, remaining);
         if (count > 0) {
             data += count;
             remaining -= static_cast<std::size_t>(count);
@@ -303,54 +303,54 @@ bool ChildProcess::writeStdin(const std::string& text) {
     return true;
 }
 
-std::string ChildProcess::readStdoutAvailable() {
-    return readAvailable(stdoutFd_);
+std::string ChildProcess::ReadStdoutAvailable() {
+    return ReadAvailable(stdout_fd_);
 }
 
-std::string ChildProcess::readStderrAvailable() {
-    return readAvailable(stderrFd_);
+std::string ChildProcess::ReadStderrAvailable() {
+    return ReadAvailable(stderr_fd_);
 }
 
-void ChildProcess::terminate() {
+void ChildProcess::Terminate() {
     if (pid_ >= 0) {
         kill(pid_, SIGTERM);
         int status = 0;
         if (waitpid(pid_, &status, 0) == pid_) {
-            rememberExitStatus(status);
+            RememberExitStatus(status);
         } else {
-            exitCode_ = 143;
+            exit_code_ = 143;
         }
         pid_ = -1;
     }
-    closePipes();
+    ClosePipes();
 }
 
-std::optional<int> ChildProcess::exitCode() const {
-    return exitCode_;
+std::optional<int> ChildProcess::ExitCode() const {
+    return exit_code_;
 }
 
-void ChildProcess::closePipes() {
-    if (stdinFd_ >= 0) {
-        close(stdinFd_);
-        stdinFd_ = -1;
+void ChildProcess::ClosePipes() {
+    if (stdin_fd_ >= 0) {
+        close(stdin_fd_);
+        stdin_fd_ = -1;
     }
-    if (stdoutFd_ >= 0) {
-        close(stdoutFd_);
-        stdoutFd_ = -1;
+    if (stdout_fd_ >= 0) {
+        close(stdout_fd_);
+        stdout_fd_ = -1;
     }
-    if (stderrFd_ >= 0) {
-        close(stderrFd_);
-        stderrFd_ = -1;
+    if (stderr_fd_ >= 0) {
+        close(stderr_fd_);
+        stderr_fd_ = -1;
     }
 }
 
-void ChildProcess::rememberExitStatus(int status) {
+void ChildProcess::RememberExitStatus(int status) {
     if (WIFEXITED(status)) {
-        exitCode_ = WEXITSTATUS(status);
+        exit_code_ = WEXITSTATUS(status);
     } else if (WIFSIGNALED(status)) {
-        exitCode_ = 128 + WTERMSIG(status);
+        exit_code_ = 128 + WTERMSIG(status);
     } else {
-        exitCode_ = -1;
+        exit_code_ = -1;
     }
 }
 

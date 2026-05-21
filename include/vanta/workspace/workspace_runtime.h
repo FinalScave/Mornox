@@ -5,9 +5,13 @@
 #include <memory>
 #include <string>
 
+#include "vanta/core/localization.h"
 #include "vanta/agent/agent_tool_registry.h"
 #include "vanta/agent/agent_context.h"
 #include "vanta/agent/agent_operation.h"
+#include "vanta/agent/agent_runtime.h"
+#include "vanta/agent/model_service.h"
+#include "vanta/debug/debug_service.h"
 #include "vanta/execution/build_service.h"
 #include "vanta/execution/job_service.h"
 #include "vanta/workspace/change_set_service.h"
@@ -15,36 +19,32 @@
 #include "vanta/language/code_intelligence_service.h"
 #include "vanta/workspace/diagnostic_service.h"
 #include "vanta/workspace/document_service.h"
-#include "vanta/workspace/editor.h"
 #include "vanta/workspace/workspace.h"
 #include "vanta/execution/execution_service.h"
-#include "vanta/builtin/git/git_client.h"
+#include "vanta/workspace/git_service.h"
 #include "vanta/workspace/ide_event.h"
-#include "vanta/workspace/command_palette.h"
-#include "vanta/builtin/cpp/cpp_index.h"
+#include "vanta/workspace/command_registry.h"
 #include "vanta/language/document_language_sync.h"
 #include "vanta/language/language_service.h"
-#include "vanta/language/language_request_pipeline.h"
 #include "vanta/platform/async.h"
-#include "vanta/plugin/contribution_registry.h"
 #include "vanta/plugin/approval_service.h"
+#include "vanta/plugin/plugin_protocol.h"
 #include "vanta/workspace/index_service.h"
 #include "vanta/workspace/initialization.h"
 #include "vanta/workspace/workspace_context.h"
-#include "vanta/workspace/workspace_services.h"
 #include "vanta/project/project.h"
 #include "vanta/project/project_manager.h"
-#include "vanta/project/project_state_store.h"
 #include "vanta/project/project_template.h"
 #include "vanta/execution/run_configuration.h"
 #include "vanta/workspace/settings_service.h"
-#include "vanta/workspace/search_service.h"
-#include "vanta/workspace/layout_state_store.h"
-#include "vanta/workspace/ui_state_store.h"
+#include "vanta/workspace/workspace_trust.h"
 #include "vanta/vfs/file_watcher.h"
 #include "vanta/vfs/virtual_file_system.h"
 
 namespace vanta {
+
+class ContributionRegistry;
+class ProjectStateStore;
 
 class WorkspaceRuntime {
 public:
@@ -53,150 +53,156 @@ public:
     WorkspaceRuntime& operator=(const WorkspaceRuntime&) = delete;
     ~WorkspaceRuntime();
 
-    bool open(const std::filesystem::path& workspacePath, std::string* errorMessage = nullptr);
-    void close();
-    bool isOpen() const;
+    bool Open(const std::filesystem::path& workspace_path, std::string* error_message = nullptr, bool initialize = true);
+    void InitializeWorkspace();
+    void Close();
+    bool IsOpen() const;
 
-    void refreshProject();
-    void startDocumentSync();
-    void stopDocumentSync();
-    bool startFileWatcher(std::string* errorMessage = nullptr);
-    void stopFileWatcher();
-    void bindComponent(std::unique_ptr<Component> component);
-    bool unbindComponent(const std::string& id);
-    void addComponentContribution(ComponentContribution contribution);
-    bool removeComponentContribution(const std::string& id);
-    std::vector<ComponentContribution> componentContributions() const;
-    ProjectManager& projectManager();
-    const ProjectManager& projectManager() const;
-    Workspace& workspace();
-    const Workspace& workspace() const;
-    Project& project();
-    const Project& project() const;
-    DocumentService& documents();
-    const DocumentService& documents() const;
-    EditorWorkspace& editor();
-    const EditorWorkspace& editor() const;
-    BuildService& build();
-    const BuildService& build() const;
-    AgentToolRegistry& agent();
-    const AgentToolRegistry& agent() const;
-    AgentContextCollector& agentContext();
-    AgentOperationService& agentOperations();
-    const AgentOperationService& agentOperations() const;
-    AgentOperationJournal& agentOperationJournal();
-    const AgentOperationJournal& agentOperationJournal() const;
-    ChangeSetService& changes();
-    ExecutionService& execution();
-    const ExecutionService& execution() const;
-    GitClient& git();
-    const GitClient& git() const;
-    RunConfigurationService& runConfigurations();
-    const RunConfigurationService& runConfigurations() const;
-    DefaultLanguageRegistry& languages();
-    const DefaultLanguageRegistry& languages() const;
-    LanguageRequestPipeline& languageRequests();
-    CodeIntelligenceService& codeIntelligence();
-    DiagnosticService& diagnostics();
-    const DiagnosticService& diagnostics() const;
-    JobService& jobs();
-    const JobService& jobs() const;
-    DefaultCommandRegistry& commands();
-    const DefaultCommandRegistry& commands() const;
-    KeybindingRegistry& keybindings();
-    CommandPalette& commandPalette();
-    CppSemanticIndex& cppIndex();
-    SearchService& search();
-    const SearchService& search() const;
-    IndexCoordinator& indexes();
-    const IndexCoordinator& indexes() const;
-    CapabilityRegistry& capabilities();
-    const CapabilityRegistry& capabilities() const;
-    WorkspaceInitializationPipeline& initialization();
-    const WorkspaceInitializationPipeline& initialization() const;
-    ProjectTemplateService& projectTemplates();
-    const ProjectTemplateService& projectTemplates() const;
-    ScratchFileService& scratchFiles();
-    const ScratchFileService& scratchFiles() const;
-    ApprovalService& approvals();
-    const ApprovalService& approvals() const;
-    SettingsService& workspaceSettings();
-    PluginStorageService& pluginStorage();
-    ContributionRegistry& contributions();
-    AsyncRuntime& async();
-    UiStateStore& ui();
-    const UiStateStore& ui() const;
-    WorkspaceContext& context();
-    const WorkspaceContext& context() const;
-
-    std::uint64_t onEvent(IdeEventBus::Listener listener);
-    void removeEventListener(std::uint64_t listenerId);
-    IdeEventBus& events();
-    void publish(IdeEvent event);
+    void RefreshProject();
+    void StartDocumentSync();
+    void StopDocumentSync();
+    bool StartFileWatcher(std::string* error_message = nullptr);
+    void StopFileWatcher();
+    WorkspaceContext& Context();
+    const WorkspaceContext& Context() const;
 
 private:
+    friend class WorkspaceContext;
+
+    void BindComponent(std::unique_ptr<Component> component);
+    bool UnbindComponent(const std::string& id);
+    ProjectManager& Projects();
+    const ProjectManager& Projects() const;
+    Workspace& WorkspaceValue();
+    const Workspace& WorkspaceValue() const;
+    Project& ProjectValue();
+    const Project& ProjectValue() const;
+    DocumentService& Documents();
+    const DocumentService& Documents() const;
+    BuildService& Build();
+    const BuildService& Build() const;
+    AgentToolRegistry& AgentTools();
+    const AgentToolRegistry& AgentTools() const;
+    AgentContextCollector& AgentContext();
+    AgentOperationService& AgentOperations();
+    const AgentOperationService& AgentOperations() const;
+    AgentOperationJournal& AgentOperationJournalValue();
+    const AgentOperationJournal& AgentOperationJournalValue() const;
+    ModelService& Models();
+    const ModelService& Models() const;
+    AgentRuntime& AgentRuntimeValue();
+    const AgentRuntime& AgentRuntimeValue() const;
+    ChangeSetService& Changes();
+    DebugService& Debug();
+    const DebugService& Debug() const;
+    ExecutionService& Execution();
+    const ExecutionService& Execution() const;
+    GitService& Git();
+    const GitService& Git() const;
+    RunConfigurationRegistry& RunConfigurations();
+    const RunConfigurationRegistry& RunConfigurations() const;
+    LanguageRegistry& Languages();
+    const LanguageRegistry& Languages() const;
+    CodeIntelligenceService& CodeIntelligence();
+    DiagnosticService& Diagnostics();
+    const DiagnosticService& Diagnostics() const;
+    JobService& Jobs();
+    const JobService& Jobs() const;
+    CommandRegistry& Commands();
+    const CommandRegistry& Commands() const;
+    IndexService& Indexes();
+    const IndexService& Indexes() const;
+    CapabilityRegistry& Capabilities();
+    const CapabilityRegistry& Capabilities() const;
+    WorkspaceInitializationPipeline& Initialization();
+    const WorkspaceInitializationPipeline& Initialization() const;
+    ProjectTemplateService& ProjectTemplates();
+    const ProjectTemplateService& ProjectTemplates() const;
+    ScratchFileService& ScratchFiles();
+    const ScratchFileService& ScratchFiles() const;
+    ApprovalService& Approvals();
+    const ApprovalService& Approvals() const;
+    WorkspaceTrustService& WorkspaceTrust();
+    const WorkspaceTrustService& WorkspaceTrust() const;
+    SettingsService& WorkspaceSettings();
+    LocalizationRegistry& Localization();
+    const LocalizationRegistry& Localization() const;
+    PluginStorageService& PluginStorage();
+    VirtualFileSystem& FileSystems();
+    const VirtualFileSystem& FileSystems() const;
+    AsyncRuntime& AsyncValue();
+
+    std::uint64_t OnEvent(IdeEventBus::Listener listener);
+    void RemoveEventListener(std::uint64_t listener_id);
+    IdeEventBus& EventsValue();
+    void Publish(IdeEvent event);
+
     Workspace workspace_;
     Project project_;
     DocumentService documents_;
-    EditorWorkspace editor_;
-    DefaultBuildService build_;
+    std::unique_ptr<BuildService> build_;
     AgentToolRegistry agent_;
-    AgentContextCollector agentContext_;
-    AgentOperationService agentOperations_;
-    AgentOperationJournal agentOperationJournal_;
+    AgentContextCollector agent_context_;
+    AgentOperationService agent_operations_;
+    AgentOperationJournal agent_operation_journal_;
+    ModelService model_service_;
+    AgentRuntime agent_runtime_;
     ChangeSetService changes_;
+    DebugService debug_;
     ExecutionService execution_;
-    GitClient git_;
-    RunConfigurationService runConfigurations_;
-    DefaultLanguageRegistry languages_;
-    LanguageRequestPipeline languageRequests_;
-    CodeIntelligenceService codeIntelligence_;
+    std::unique_ptr<GitService> git_;
+    std::unique_ptr<RunConfigurationRegistry> run_configuration_registry_;
+    std::unique_ptr<LanguageRegistry> languages_;
+    CodeIntelligenceService code_intelligence_;
     DiagnosticService diagnostics_;
     JobService jobs_;
-    DefaultCommandRegistry commands_;
-    KeybindingRegistry keybindings_;
-    CommandPalette commandPalette_;
-    CppSemanticIndex cppIndex_;
-    SearchService search_;
-    IndexCoordinator indexes_;
+    std::unique_ptr<CommandRegistry> commands_;
+    IndexService indexes_;
     CapabilityRegistry capabilities_;
     WorkspaceInitializationPipeline initialization_;
-    ProjectTemplateService projectTemplates_;
-    ScratchFileService scratchFiles_;
+    ProjectTemplateService project_templates_;
+    ScratchFileService scratch_files_;
     ApprovalService approvals_;
-    SettingsService workspaceSettings_;
-    PluginStorageService pluginStorage_;
-    ContributionRegistry contributions_;
-    UiStateStore ui_;
+    WorkspaceTrustService workspace_trust_;
+    SettingsService workspace_settings_;
+    LocalizationRegistry localization_;
+    PluginStorageService plugin_storage_;
+    std::unique_ptr<ContributionRegistry> contributions_;
 
-    LayoutStateStore& layoutComponent();
-    const LayoutStateStore& layoutComponent() const;
-    void bindBuiltinComponents();
-    void refreshIndexes(std::string title);
-    void updateCoreCapabilities();
-    void reconcileComponentContributions();
-    void connectEventRelays();
-    void disconnectEventRelays();
-    void handleFileChange(const VirtualFileChangeEvent& event);
-    void publishDocumentEvent(const DocumentChangeEvent& event);
-    void publishJobEvent(const JobChangeEvent& event);
+    void AddComponentContribution(ComponentContribution contribution);
+    RegistrationHandle RegisterComponentContribution(ComponentContribution contribution);
+    bool RemoveComponentContribution(const std::string& id);
+    std::vector<ComponentContribution> ComponentContributions() const;
+    RegistrationHandle RegisterContribution(PluginRegistration contribution);
+    std::vector<PluginRegistration> Contributions() const;
+    std::vector<PluginRegistration> Contributions(PluginRegistrationKind kind) const;
+    void BindBuiltinComponents();
+    void RefreshIndexes(std::string title);
+    void UpdateCoreCapabilities();
+    void ReconcileComponentContributions();
+    void ConnectEventRelays();
+    void DisconnectEventRelays();
+    void HandleFileChange(const VirtualFileChangeEvent& event);
+    void PublishDocumentEvent(const DocumentChangeEvent& event);
+    void PublishJobEvent(const JobChangeEvent& event);
 
     VirtualFileSystem& vfs_;
     AsyncRuntime& async_;
     IdeEventBus events_;
-    ProjectManager projectManager_;
-    ProjectStateStore projectStateStore_;
-    ProjectState projectState_;
-    ComponentContributionRegistry componentContributions_;
-    std::map<std::string, bool> activeContributedComponents_;
+    ProjectManager project_manager_;
+    std::unique_ptr<ProjectStateStore> project_state_store_;
+    ProjectState project_state_;
+    ComponentContributionRegistry component_contributions_;
+    std::map<std::string, bool> active_contributed_components_;
     WorkspaceContext context_;
-    std::unique_ptr<FileWatcher> fileWatcher_;
-    std::unique_ptr<DocumentLanguageSynchronizer> documentSync_;
-    std::uint64_t documentListener_ = 0;
-    std::uint64_t diagnosticListener_ = 0;
-    std::uint64_t jobListener_ = 0;
-    std::map<JobId, JobStatus> jobStatuses_;
+    std::unique_ptr<FileWatcher> file_watcher_;
+    std::unique_ptr<DocumentLanguageSynchronizer> document_sync_;
+    std::uint64_t document_listener_ = 0;
+    std::uint64_t diagnostic_listener_ = 0;
+    std::uint64_t job_listener_ = 0;
+    std::map<JobId, JobStatus> job_statuses_;
     bool open_ = false;
+    bool initialized_ = false;
 };
 
 }

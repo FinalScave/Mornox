@@ -2,28 +2,28 @@
 
 namespace vanta {
 
-const ProjectModel& Project::model() const {
+const ProjectModel& Project::Model() const {
     return model_;
 }
 
-void Project::setModel(ProjectModel model) {
+void Project::SetModel(ProjectModel model) {
     model_ = std::move(model);
 }
 
-ComponentRegistry& Project::components() {
+ComponentRegistry& Project::Components() {
     return components_;
 }
 
-const ComponentRegistry& Project::components() const {
+const ComponentRegistry& Project::Components() const {
     return components_;
 }
 
-Component* Project::getComponent(const std::string& id) {
-    return components_.get(id);
+Component* Project::GetComponent(const std::string& id) {
+    return components_.Get(id);
 }
 
-const Component* Project::getComponent(const std::string& id) const {
-    return components_.get(id);
+const Component* Project::GetComponent(const std::string& id) const {
+    return components_.Get(id);
 }
 
 }

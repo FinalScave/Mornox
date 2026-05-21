@@ -6,13 +6,13 @@
 namespace vanta {
 namespace {
 
-std::filesystem::path normalizedExistingPath(const std::filesystem::path& path) {
+std::filesystem::path NormalizedExistingPath(const std::filesystem::path& path) {
     std::error_code error;
     const auto normalized = std::filesystem::weakly_canonical(path, error);
     return error ? path : normalized;
 }
 
-DiagnosticSeverity severityFromString(const std::string& severity) {
+DiagnosticSeverity SeverityFromString(const std::string& severity) {
     if (severity == "error") {
         return DiagnosticSeverity::Error;
     }
@@ -25,13 +25,13 @@ DiagnosticSeverity severityFromString(const std::string& severity) {
     return DiagnosticSeverity::Note;
 }
 
-bool looksLikeUri(const std::string& value) {
+bool LooksLikeUri(const std::string& value) {
     return value.find("://") != std::string::npos;
 }
 
 }
 
-std::vector<ProblemMatch> ProblemMatcher::matchCompilerOutput(const std::string& output) const {
+std::vector<ProblemMatch> ProblemMatcher::MatchCompilerOutput(const std::string& output) const {
     std::vector<ProblemMatch> matches;
     const std::regex pattern(R"(([^:\n]+):(\d+):(\d+):\s+(warning|error|note):\s+(.+))");
     std::istringstream stream(output);
@@ -43,10 +43,10 @@ std::vector<ProblemMatch> ProblemMatcher::matchCompilerOutput(const std::string&
         }
 
         ProblemMatch problem;
-        problem.filePath = match[1].str();
+        problem.file_path = match[1].str();
         problem.line = std::stoi(match[2].str());
         problem.column = std::stoi(match[3].str());
-        problem.severity = severityFromString(match[4].str());
+        problem.severity = SeverityFromString(match[4].str());
         problem.source = "build";
         problem.message = match[5].str();
         matches.push_back(std::move(problem));
@@ -54,15 +54,15 @@ std::vector<ProblemMatch> ProblemMatcher::matchCompilerOutput(const std::string&
     return matches;
 }
 
-std::vector<Diagnostic> DiagnosticResolver::resolve(
+std::vector<Diagnostic> DiagnosticResolver::Resolve(
     const std::vector<ProblemMatch>& matches,
     const Workspace& workspace,
-    const std::filesystem::path& buildDirectory) const {
+    const std::filesystem::path& build_directory) const {
     std::vector<Diagnostic> diagnostics;
     diagnostics.reserve(matches.size());
     for (const ProblemMatch& match : matches) {
         Diagnostic diagnostic;
-        diagnostic.location.file = resolveFile(match, workspace, buildDirectory);
+        diagnostic.location.file = ResolveFile(match, workspace, build_directory);
         diagnostic.location.line = match.line;
         diagnostic.location.column = match.column;
         diagnostic.severity = match.severity;
@@ -73,33 +73,33 @@ std::vector<Diagnostic> DiagnosticResolver::resolve(
     return diagnostics;
 }
 
-VirtualFile DiagnosticResolver::resolveFile(
+VirtualFile DiagnosticResolver::ResolveFile(
     const ProblemMatch& match,
     const Workspace& workspace,
-    const std::filesystem::path& buildDirectory) const {
-    if (looksLikeUri(match.filePath)) {
-        return VirtualFile(Uri::parse(match.filePath), nullptr);
+    const std::filesystem::path& build_directory) const {
+    if (LooksLikeUri(match.file_path)) {
+        return VirtualFile(Uri::Parse(match.file_path), nullptr);
     }
 
-    const std::filesystem::path rawPath(match.filePath);
-    if (rawPath.is_absolute()) {
-        return workspace.file(normalizedExistingPath(rawPath));
+    const std::filesystem::path raw_path(match.file_path);
+    if (raw_path.is_absolute()) {
+        return workspace.File(NormalizedExistingPath(raw_path));
     }
 
-    const std::filesystem::path fromWorkspace = workspace.resolve(rawPath);
-    if (std::filesystem::exists(fromWorkspace)) {
-        return workspace.file(normalizedExistingPath(fromWorkspace));
+    const std::filesystem::path from_workspace = workspace.Resolve(raw_path);
+    if (std::filesystem::exists(from_workspace)) {
+        return workspace.File(NormalizedExistingPath(from_workspace));
     }
 
-    if (!buildDirectory.empty()) {
-        const std::filesystem::path absoluteBuildDirectory = workspace.resolve(buildDirectory);
-        const std::filesystem::path fromBuild = absoluteBuildDirectory / rawPath;
-        if (std::filesystem::exists(fromBuild)) {
-            return workspace.file(normalizedExistingPath(fromBuild));
+    if (!build_directory.empty()) {
+        const std::filesystem::path absolute_build_directory = workspace.Resolve(build_directory);
+        const std::filesystem::path from_build = absolute_build_directory / raw_path;
+        if (std::filesystem::exists(from_build)) {
+            return workspace.File(NormalizedExistingPath(from_build));
         }
     }
 
-    return workspace.file(fromWorkspace);
+    return workspace.File(from_workspace);
 }
 
 }

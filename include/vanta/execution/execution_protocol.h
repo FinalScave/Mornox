@@ -5,7 +5,7 @@
 #include <vector>
 
 #include "vanta/execution/job_service.h"
-#include "vanta/platform/json.h"
+#include "vanta/core/value.h"
 
 namespace vanta {
 
@@ -19,19 +19,16 @@ enum class ExecutionEventKind {
 
 struct ExecutionEvent {
     ExecutionEventKind kind = ExecutionEventKind::Started;
-    JobId jobId = 0;
-    std::string executorId;
-    std::string targetId;
+    JobId job_id = 0;
+    std::string executor_id;
+    std::string target_id;
     std::string text;
     double progress = -1.0;
-    int exitCode = 0;
-    Json metadata;
+    int exit_code = 0;
 };
 
 using ExecutionEventCallback = std::function<void(const ExecutionEvent&)>;
 
-std::string toString(ExecutionEventKind kind);
-Json toJson(const ExecutionEvent& event);
-Json toJson(const std::vector<ExecutionEvent>& events);
+std::string ToString(ExecutionEventKind kind);
 
 }

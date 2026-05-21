@@ -4,14 +4,22 @@
 #include <filesystem>
 #include <utility>
 
+#include "execution/build_service_impl.h"
+#include "execution/run_configuration_registry_impl.h"
+#include "language/language_registry_impl.h"
+#include "plugin/contribution_registry.h"
+#include "project/project_state_store.h"
+#include "workspace/command_registry_impl.h"
+#include "workspace/git_service_impl.h"
+
 namespace vanta {
 namespace {
 
-bool isTerminalStatus(JobStatus status) {
+bool IsTerminalStatus(JobStatus status) {
     return status == JobStatus::Succeeded || status == JobStatus::Failed || status == JobStatus::Cancelled;
 }
 
-IdeEventKind kindFromDocumentChange(DocumentChangeKind kind) {
+IdeEventKind KindFromDocumentChange(DocumentChangeKind kind) {
     switch (kind) {
     case DocumentChangeKind::Opened:
         return IdeEventKind::DocumentOpened;
@@ -25,675 +33,703 @@ IdeEventKind kindFromDocumentChange(DocumentChangeKind kind) {
     return IdeEventKind::DocumentChanged;
 }
 
-Json stringsToJson(const std::vector<std::string>& values) {
-    Json::Array items;
+std::string JoinStrings(const std::vector<std::string>& values) {
+    std::string result;
     for (const std::string& value : values) {
-        items.push_back(Json(value));
+        if (!result.empty()) {
+            result += ", ";
+        }
+        result += value;
     }
-    return Json::array(std::move(items));
+    return result;
 }
 
 }
 
 WorkspaceRuntime::WorkspaceRuntime(VirtualFileSystem& vfs, AsyncRuntime& async)
-    : vfs_(vfs), async_(async), context_(*this) {
-    agentOperations_.setJournal(&agentOperationJournal_);
-    registerDefaultIndexProviders(indexes_, search_, cppIndex_);
-    registerDefaultProjectTemplates(projectTemplates_);
-    registerDefaultSettings(workspaceSettings_);
-    initialization_.reset();
+    : build_(std::make_unique<internal::BuildServiceImpl>()),
+      git_(std::make_unique<internal::GitServiceImpl>()),
+      run_configuration_registry_(std::make_unique<internal::RunConfigurationRegistryImpl>()),
+      languages_(std::make_unique<internal::LanguageRegistryImpl>()),
+      commands_(std::make_unique<internal::CommandRegistryImpl>()),
+      contributions_(std::make_unique<ContributionRegistry>()),
+      vfs_(vfs),
+      async_(async),
+      project_state_store_(std::make_unique<ProjectStateStore>()),
+      context_(*this) {
+    agent_operations_.SetJournal(&agent_operation_journal_);
+    approvals_.SetWorkspaceTrust(&workspace_trust_);
+    RegisterDefaultIndexProviders(indexes_);
+    RegisterDefaultProjectTemplates(project_templates_);
+    RegisterDefaultSettings(workspace_settings_);
+    initialization_.Reset();
 }
 
 WorkspaceRuntime::~WorkspaceRuntime() {
-    close();
+    Close();
 }
 
-bool WorkspaceRuntime::open(const std::filesystem::path& workspacePath, std::string* errorMessage) {
-    initialization_.reset();
-    initialization_.start(WorkspaceInitializationStage::WorkspaceOpened, "Opening workspace");
-    capabilities_.clear();
-    indexes_.clearSnapshots();
-    jobs_.clear();
-    agentOperationJournal_.clear();
-    const JobId openJob = jobs_.start(JobKind::Initialization, "Open workspace");
-    workspace_.bindFileSystem(vfs_);
-    std::error_code statusError;
-    const bool openAsFile = std::filesystem::is_regular_file(workspacePath, statusError);
-    std::filesystem::path rootPath = openAsFile ? workspacePath.parent_path() : workspacePath;
-    if (rootPath.empty()) {
-        rootPath = std::filesystem::current_path();
+bool WorkspaceRuntime::Open(const std::filesystem::path& workspace_path, std::string* error_message, bool initialize) {
+    initialization_.Reset();
+    initialization_.Start(WorkspaceInitializationStage::WorkspaceOpened, "Opening workspace");
+    capabilities_.Clear();
+    indexes_.ClearSnapshots();
+    jobs_.Clear();
+    agent_operation_journal_.Clear();
+    agent_runtime_.Clear();
+    initialized_ = false;
+    const JobId open_job = jobs_.Start(JobKind::Initialization, "Open workspace");
+    workspace_.BindFileSystem(vfs_);
+    std::error_code status_error;
+    const bool open_as_file = std::filesystem::is_regular_file(workspace_path, status_error);
+    std::filesystem::path root_path = open_as_file ? workspace_path.parent_path() : workspace_path;
+    if (root_path.empty()) {
+        root_path = std::filesystem::current_path();
     }
-    if (!workspace_.open(rootPath, errorMessage)) {
-        initialization_.fail(WorkspaceInitializationStage::WorkspaceOpened, errorMessage == nullptr ? "Workspace open failed" : *errorMessage);
-        jobs_.complete(openJob, false, "Workspace open failed");
+    if (!workspace_.Open(root_path, error_message)) {
+        initialization_.Fail(WorkspaceInitializationStage::WorkspaceOpened, error_message == nullptr ? "Workspace open failed" : *error_message);
+        jobs_.Complete(open_job, false, "Workspace open failed");
         return false;
     }
-    initialization_.complete(WorkspaceInitializationStage::WorkspaceOpened, "Workspace opened", Json::object({
-        {"root", Json(workspace_.info().rootPath.string())},
-        {"singleFile", Json(openAsFile)},
-    }));
-    jobs_.updateProgress(openJob, 0.3, "Workspace opened");
-    if (openAsFile) {
-        projectManager_.setSingleFile(workspace_.file(workspacePath));
+    static_cast<internal::GitServiceImpl&>(*git_).SetWorkspaceRoot(workspace_.Info().root_path);
+    initialization_.Complete(WorkspaceInitializationStage::WorkspaceOpened, "Workspace opened");
+    jobs_.UpdateProgress(open_job, 0.3, "Workspace opened");
+    if (open_as_file) {
+        project_manager_.SetSingleFile(workspace_.File(workspace_path));
     } else {
-        projectManager_.clearSingleFile();
+        project_manager_.ClearSingleFile();
     }
 
-    workspaceSettings_.load({.kind = SettingScopeKind::Workspace, .qualifier = workspace_.info().rootPath.string()}, workspace_.info().rootPath / ".vanta" / "settings.json");
-    projectStateStore_.load(workspace_.info().rootPath / ".vanta" / "state.json", &projectState_);
-    pluginStorage_.setRoot(workspace_.info().rootPath / ".vanta" / "plugin-storage");
-    registerDefaultExecutionProviders(execution_);
-    registerDefaultRunConfigurationProviders(runConfigurations_);
-    bindBuiltinComponents();
-    context_.setProject(&project_);
-    project_.components().attachAll(context_);
-    project_.components().restoreAll(projectState_);
-    initialization_.complete(WorkspaceInitializationStage::ComponentsReady, "Components attached");
-    jobs_.updateProgress(openJob, 0.5, "Components attached");
-    refreshIndexes("Initial workspace index");
-    agentContext_.clearProviders();
-    registerDefaultAgentContextProviders(agentContext_);
-    initialization_.complete(WorkspaceInitializationStage::AgentContextReady, "Agent context providers ready");
-    initialization_.complete(WorkspaceInitializationStage::LanguageServicesReady, "Language registry ready", Json::object({
-        {"languages", Json(static_cast<std::int64_t>(languages_.languageIds().size()))},
-    }));
-    initialization_.complete(WorkspaceInitializationStage::BuildModelReady, "Build providers ready", Json::object({
-        {"providers", Json(static_cast<std::int64_t>(build_.buildProviderIds().size()))},
-    }));
-    connectEventRelays();
+    workspace_settings_.Load({.kind = SettingScopeKind::Workspace, .qualifier = workspace_.Info().root_path.string()}, workspace_.Info().root_path / ".vanta" / "settings.json");
+    project_state_store_->Load(workspace_.Info().root_path / ".vanta" / "state.json", &project_state_);
+    plugin_storage_.SetRoot(workspace_.Info().root_path / ".vanta" / "plugin-storage");
     open_ = true;
-    ui_.attach(*this);
-    updateCoreCapabilities();
-    jobs_.complete(openJob, true, "Workspace open completed");
-    publish({
-        .kind = IdeEventKind::WorkspaceOpened,
-        .file = workspace_.rootFile(),
-    });
+    jobs_.Complete(open_job, true, "Workspace open completed");
+    if (initialize) {
+        InitializeWorkspace();
+    }
     return true;
 }
 
-void WorkspaceRuntime::close() {
+void WorkspaceRuntime::InitializeWorkspace() {
+    if (!open_ || initialized_) {
+        return;
+    }
+    const JobId initialize_job = jobs_.Start(JobKind::Initialization, "Initialize workspace");
+    RegisterDefaultExecutionProviders(execution_);
+    RegisterDefaultRunConfigurationProviders(*run_configuration_registry_);
+    BindBuiltinComponents();
+    context_.SetProject(&project_);
+    project_.Components().AttachAll(context_);
+    project_.Components().RestoreAll(project_state_);
+    initialization_.Complete(WorkspaceInitializationStage::ComponentsReady, "Components attached");
+    jobs_.UpdateProgress(initialize_job, 0.4, "Components attached");
+    RegisterDefaultAgentContextProviders(agent_context_);
+    initialization_.Complete(WorkspaceInitializationStage::AgentContextReady, "Agent context providers Ready");
+    jobs_.UpdateProgress(initialize_job, 0.5, "Agent context providers Ready");
+    RefreshProject();
+    initialization_.Complete(WorkspaceInitializationStage::LanguageServicesReady, "Language registry Ready");
+    initialization_.Complete(WorkspaceInitializationStage::BuildModelReady, "Build providers Ready");
+    ConnectEventRelays();
+    initialized_ = true;
+    UpdateCoreCapabilities();
+    jobs_.Complete(initialize_job, true, "Workspace initialization completed");
+    Publish({
+        .kind = IdeEventKind::WorkspaceOpened,
+        .file = workspace_.RootFile(),
+    });
+}
+
+void WorkspaceRuntime::Close() {
     if (!open_) {
         return;
     }
-    stopFileWatcher();
-    stopDocumentSync();
-    const VirtualFile root = workspace_.rootFile();
-    project_.components().closeProject(project_);
-    layoutComponent().capture(ui_.state());
-    projectState_ = project_.components().saveAll(projectState_);
-    workspaceSettings_.save({.kind = SettingScopeKind::Workspace, .qualifier = workspace_.info().rootPath.string()}, workspace_.info().rootPath / ".vanta" / "settings.json");
-    projectStateStore_.save(workspace_.info().rootPath / ".vanta" / "state.json", projectState_);
+    StopFileWatcher();
+    StopDocumentSync();
+    const VirtualFile root = workspace_.RootFile();
+    project_.Components().CloseProject(project_);
+    project_state_ = project_.Components().SaveAll(project_state_);
+    workspace_settings_.Save({.kind = SettingScopeKind::Workspace, .qualifier = workspace_.Info().root_path.string()}, workspace_.Info().root_path / ".vanta" / "settings.json");
+    project_state_store_->Save(workspace_.Info().root_path / ".vanta" / "state.json", project_state_);
     open_ = false;
-    publish({
+    initialized_ = false;
+    Publish({
         .kind = IdeEventKind::WorkspaceClosed,
         .file = root,
     });
-    ui_.detach();
-    disconnectEventRelays();
-    project_.components().detachAll();
-    context_.setProject(nullptr);
-    indexes_.clearSnapshots();
-    capabilities_.clear();
-    jobs_.clear();
+    DisconnectEventRelays();
+    project_.Components().DetachAll();
+    context_.SetProject(nullptr);
+    indexes_.ClearSnapshots();
+    capabilities_.Clear();
+    jobs_.Clear();
+    agent_runtime_.Clear();
 }
 
-bool WorkspaceRuntime::isOpen() const {
+bool WorkspaceRuntime::IsOpen() const {
     return open_;
 }
 
-void WorkspaceRuntime::refreshProject() {
-    const JobId job = jobs_.start(JobKind::Initialization, "Refresh project");
-    initialization_.start(WorkspaceInitializationStage::ProjectModelResolved, "Refreshing project model");
-    project_.setModel(projectManager_.refresh(context_));
-    initialization_.complete(WorkspaceInitializationStage::ProjectModelResolved, "Project model ready", Json::object({
-        {"type", Json(primaryProjectType(project_.model()))},
-        {"origin", Json(toString(project_.model().origin))},
-    }));
-    jobs_.updateProgress(job, 0.4, "Project model ready");
-    refreshIndexes("Refresh project index");
-    reconcileComponentContributions();
-    project_.components().openProject(project_);
-    initialization_.complete(WorkspaceInitializationStage::ComponentsReady, "Project components ready");
-    initialization_.complete(WorkspaceInitializationStage::BuildModelReady, "Build model ready", Json::object({
-        {"providers", Json(static_cast<std::int64_t>(build_.buildProviderIds().size()))},
-    }));
-    updateCoreCapabilities();
-    jobs_.complete(job, true, "Project refresh completed");
-    publish({
+void WorkspaceRuntime::RefreshProject() {
+    const JobId job = jobs_.Start(JobKind::Initialization, "Refresh project");
+    initialization_.Start(WorkspaceInitializationStage::ProjectModelResolved, "Refreshing project model");
+    project_.SetModel(project_manager_.Refresh(context_));
+    initialization_.Complete(WorkspaceInitializationStage::ProjectModelResolved, "Project model Ready");
+    jobs_.UpdateProgress(job, 0.4, "Project model Ready");
+    RefreshIndexes("Refresh project index");
+    ReconcileComponentContributions();
+    project_.Components().OpenProject(project_);
+    initialization_.Complete(WorkspaceInitializationStage::ComponentsReady, "Project components Ready");
+    initialization_.Complete(WorkspaceInitializationStage::BuildModelReady, "Build model Ready");
+    UpdateCoreCapabilities();
+    project_manager_.InvalidateViews({});
+    jobs_.Complete(job, true, "Project refresh completed");
+    Publish({
         .kind = IdeEventKind::ProjectChanged,
-        .file = workspace_.rootFile(),
+        .file = workspace_.RootFile(),
     });
 }
 
-void WorkspaceRuntime::startDocumentSync() {
-    if (documentSync_ != nullptr) {
+void WorkspaceRuntime::StartDocumentSync() {
+    if (document_sync_ != nullptr) {
         return;
     }
-    documentSync_ = std::make_unique<DocumentLanguageSynchronizer>(documents_, languages_);
-    documentSync_->start();
+    document_sync_ = std::make_unique<DocumentLanguageSynchronizer>(documents_, *languages_);
+    document_sync_->Start();
 }
 
-void WorkspaceRuntime::stopDocumentSync() {
-    if (documentSync_ == nullptr) {
+void WorkspaceRuntime::StopDocumentSync() {
+    if (document_sync_ == nullptr) {
         return;
     }
-    documentSync_->stop();
-    documentSync_.reset();
+    document_sync_->Stop();
+    document_sync_.reset();
 }
 
-bool WorkspaceRuntime::startFileWatcher(std::string* errorMessage) {
-    if (fileWatcher_ != nullptr && fileWatcher_->running()) {
+bool WorkspaceRuntime::StartFileWatcher(std::string* error_message) {
+    if (file_watcher_ != nullptr && file_watcher_->Running()) {
         return true;
     }
-    fileWatcher_ = createPlatformFileWatcher(vfs_);
-    return fileWatcher_->start(workspace_.rootFile(), [this](const VirtualFileChangeEvent& event) {
-        async_.postMain([this, event] {
-            handleFileChange(event);
+    file_watcher_ = CreatePlatformFileWatcher(vfs_);
+    return file_watcher_->Start(workspace_.RootFile(), [this](const VirtualFileChangeEvent& event) {
+        async_.PostMain([this, event] {
+            HandleFileChange(event);
         });
-    }, errorMessage);
+    }, error_message);
 }
 
-void WorkspaceRuntime::stopFileWatcher() {
-    if (fileWatcher_ == nullptr) {
+void WorkspaceRuntime::StopFileWatcher() {
+    if (file_watcher_ == nullptr) {
         return;
     }
-    fileWatcher_->stop();
-    fileWatcher_.reset();
+    file_watcher_->Stop();
+    file_watcher_.reset();
 }
 
-void WorkspaceRuntime::bindComponent(std::unique_ptr<Component> component) {
-    project_.components().rememberState(projectState_);
-    project_.components().bind(std::move(component));
+void WorkspaceRuntime::BindComponent(std::unique_ptr<Component> component) {
+    project_.Components().RememberState(project_state_);
+    project_.Components().Bind(std::move(component));
 }
 
-bool WorkspaceRuntime::unbindComponent(const std::string& id) {
-    if (Component* component = project_.components().get(id)) {
+bool WorkspaceRuntime::UnbindComponent(const std::string& id) {
+    if (Component* component = project_.Components().Get(id)) {
         try {
-            projectState_.componentStates[id] = component->saveState();
+            project_state_.component_states[id] = component->SaveState();
         } catch (...) {
         }
     }
-    return project_.components().unbind(id);
+    return project_.Components().Unbind(id);
 }
 
-void WorkspaceRuntime::addComponentContribution(ComponentContribution contribution) {
-    componentContributions_.add(std::move(contribution));
+void WorkspaceRuntime::AddComponentContribution(ComponentContribution contribution) {
+    component_contributions_.Add(std::move(contribution));
     if (open_) {
-        reconcileComponentContributions();
+        ReconcileComponentContributions();
     }
 }
 
-bool WorkspaceRuntime::removeComponentContribution(const std::string& id) {
-    const bool removed = componentContributions_.remove(id);
+RegistrationHandle WorkspaceRuntime::RegisterComponentContribution(ComponentContribution contribution) {
+    if (contribution.id.empty()) {
+        return {};
+    }
+    const std::string id = contribution.id;
+    AddComponentContribution(std::move(contribution));
+    return RegistrationHandle([this, id] {
+        RemoveComponentContribution(id);
+    });
+}
+
+bool WorkspaceRuntime::RemoveComponentContribution(const std::string& id) {
+    const bool removed = component_contributions_.Remove(id);
     if (removed && open_) {
-        reconcileComponentContributions();
+        ReconcileComponentContributions();
     }
     return removed;
 }
 
-std::vector<ComponentContribution> WorkspaceRuntime::componentContributions() const {
-    return componentContributions_.list();
+std::vector<ComponentContribution> WorkspaceRuntime::ComponentContributions() const {
+    return component_contributions_.List();
 }
 
-ProjectManager& WorkspaceRuntime::projectManager() {
-    return projectManager_;
+ProjectManager& WorkspaceRuntime::Projects() {
+    return project_manager_;
 }
 
-const ProjectManager& WorkspaceRuntime::projectManager() const {
-    return projectManager_;
+const ProjectManager& WorkspaceRuntime::Projects() const {
+    return project_manager_;
 }
 
-Workspace& WorkspaceRuntime::workspace() {
+Workspace& WorkspaceRuntime::WorkspaceValue() {
     return workspace_;
 }
 
-const Workspace& WorkspaceRuntime::workspace() const {
+const Workspace& WorkspaceRuntime::WorkspaceValue() const {
     return workspace_;
 }
 
-Project& WorkspaceRuntime::project() {
+Project& WorkspaceRuntime::ProjectValue() {
     return project_;
 }
 
-const Project& WorkspaceRuntime::project() const {
+const Project& WorkspaceRuntime::ProjectValue() const {
     return project_;
 }
 
-DocumentService& WorkspaceRuntime::documents() {
+DocumentService& WorkspaceRuntime::Documents() {
     return documents_;
 }
 
-const DocumentService& WorkspaceRuntime::documents() const {
+const DocumentService& WorkspaceRuntime::Documents() const {
     return documents_;
 }
 
-EditorWorkspace& WorkspaceRuntime::editor() {
-    return editor_;
+BuildService& WorkspaceRuntime::Build() {
+    return *build_;
 }
 
-const EditorWorkspace& WorkspaceRuntime::editor() const {
-    return editor_;
+const BuildService& WorkspaceRuntime::Build() const {
+    return *build_;
 }
 
-BuildService& WorkspaceRuntime::build() {
-    return build_;
-}
-
-const BuildService& WorkspaceRuntime::build() const {
-    return build_;
-}
-
-AgentToolRegistry& WorkspaceRuntime::agent() {
+AgentToolRegistry& WorkspaceRuntime::AgentTools() {
     return agent_;
 }
 
-const AgentToolRegistry& WorkspaceRuntime::agent() const {
+const AgentToolRegistry& WorkspaceRuntime::AgentTools() const {
     return agent_;
 }
 
-AgentContextCollector& WorkspaceRuntime::agentContext() {
-    return agentContext_;
+AgentContextCollector& WorkspaceRuntime::AgentContext() {
+    return agent_context_;
 }
 
-AgentOperationService& WorkspaceRuntime::agentOperations() {
-    return agentOperations_;
+AgentOperationService& WorkspaceRuntime::AgentOperations() {
+    return agent_operations_;
 }
 
-const AgentOperationService& WorkspaceRuntime::agentOperations() const {
-    return agentOperations_;
+const AgentOperationService& WorkspaceRuntime::AgentOperations() const {
+    return agent_operations_;
 }
 
-AgentOperationJournal& WorkspaceRuntime::agentOperationJournal() {
-    return agentOperationJournal_;
+AgentOperationJournal& WorkspaceRuntime::AgentOperationJournalValue() {
+    return agent_operation_journal_;
 }
 
-const AgentOperationJournal& WorkspaceRuntime::agentOperationJournal() const {
-    return agentOperationJournal_;
+const AgentOperationJournal& WorkspaceRuntime::AgentOperationJournalValue() const {
+    return agent_operation_journal_;
 }
 
-ChangeSetService& WorkspaceRuntime::changes() {
+ModelService& WorkspaceRuntime::Models() {
+    return model_service_;
+}
+
+const ModelService& WorkspaceRuntime::Models() const {
+    return model_service_;
+}
+
+AgentRuntime& WorkspaceRuntime::AgentRuntimeValue() {
+    return agent_runtime_;
+}
+
+const AgentRuntime& WorkspaceRuntime::AgentRuntimeValue() const {
+    return agent_runtime_;
+}
+
+ChangeSetService& WorkspaceRuntime::Changes() {
     return changes_;
 }
 
-ExecutionService& WorkspaceRuntime::execution() {
+DebugService& WorkspaceRuntime::Debug() {
+    return debug_;
+}
+
+const DebugService& WorkspaceRuntime::Debug() const {
+    return debug_;
+}
+
+ExecutionService& WorkspaceRuntime::Execution() {
     return execution_;
 }
 
-const ExecutionService& WorkspaceRuntime::execution() const {
+const ExecutionService& WorkspaceRuntime::Execution() const {
     return execution_;
 }
 
-GitClient& WorkspaceRuntime::git() {
-    return git_;
+GitService& WorkspaceRuntime::Git() {
+    return *git_;
 }
 
-const GitClient& WorkspaceRuntime::git() const {
-    return git_;
+const GitService& WorkspaceRuntime::Git() const {
+    return *git_;
 }
 
-RunConfigurationService& WorkspaceRuntime::runConfigurations() {
-    return runConfigurations_;
+RunConfigurationRegistry& WorkspaceRuntime::RunConfigurations() {
+    return *run_configuration_registry_;
 }
 
-const RunConfigurationService& WorkspaceRuntime::runConfigurations() const {
-    return runConfigurations_;
+const RunConfigurationRegistry& WorkspaceRuntime::RunConfigurations() const {
+    return *run_configuration_registry_;
 }
 
-DefaultLanguageRegistry& WorkspaceRuntime::languages() {
-    return languages_;
+LanguageRegistry& WorkspaceRuntime::Languages() {
+    return *languages_;
 }
 
-const DefaultLanguageRegistry& WorkspaceRuntime::languages() const {
-    return languages_;
+const LanguageRegistry& WorkspaceRuntime::Languages() const {
+    return *languages_;
 }
 
-LanguageRequestPipeline& WorkspaceRuntime::languageRequests() {
-    return languageRequests_;
+CodeIntelligenceService& WorkspaceRuntime::CodeIntelligence() {
+    return code_intelligence_;
 }
 
-CodeIntelligenceService& WorkspaceRuntime::codeIntelligence() {
-    return codeIntelligence_;
-}
-
-DiagnosticService& WorkspaceRuntime::diagnostics() {
+DiagnosticService& WorkspaceRuntime::Diagnostics() {
     return diagnostics_;
 }
 
-const DiagnosticService& WorkspaceRuntime::diagnostics() const {
+const DiagnosticService& WorkspaceRuntime::Diagnostics() const {
     return diagnostics_;
 }
 
-JobService& WorkspaceRuntime::jobs() {
+JobService& WorkspaceRuntime::Jobs() {
     return jobs_;
 }
 
-const JobService& WorkspaceRuntime::jobs() const {
+const JobService& WorkspaceRuntime::Jobs() const {
     return jobs_;
 }
 
-DefaultCommandRegistry& WorkspaceRuntime::commands() {
-    return commands_;
+CommandRegistry& WorkspaceRuntime::Commands() {
+    return *commands_;
 }
 
-const DefaultCommandRegistry& WorkspaceRuntime::commands() const {
-    return commands_;
+const CommandRegistry& WorkspaceRuntime::Commands() const {
+    return *commands_;
 }
 
-KeybindingRegistry& WorkspaceRuntime::keybindings() {
-    return keybindings_;
-}
-
-CommandPalette& WorkspaceRuntime::commandPalette() {
-    return commandPalette_;
-}
-
-CppSemanticIndex& WorkspaceRuntime::cppIndex() {
-    return cppIndex_;
-}
-
-SearchService& WorkspaceRuntime::search() {
-    return search_;
-}
-
-const SearchService& WorkspaceRuntime::search() const {
-    return search_;
-}
-
-IndexCoordinator& WorkspaceRuntime::indexes() {
+IndexService& WorkspaceRuntime::Indexes() {
     return indexes_;
 }
 
-const IndexCoordinator& WorkspaceRuntime::indexes() const {
+const IndexService& WorkspaceRuntime::Indexes() const {
     return indexes_;
 }
 
-CapabilityRegistry& WorkspaceRuntime::capabilities() {
+CapabilityRegistry& WorkspaceRuntime::Capabilities() {
     return capabilities_;
 }
 
-const CapabilityRegistry& WorkspaceRuntime::capabilities() const {
+const CapabilityRegistry& WorkspaceRuntime::Capabilities() const {
     return capabilities_;
 }
 
-WorkspaceInitializationPipeline& WorkspaceRuntime::initialization() {
+WorkspaceInitializationPipeline& WorkspaceRuntime::Initialization() {
     return initialization_;
 }
 
-const WorkspaceInitializationPipeline& WorkspaceRuntime::initialization() const {
+const WorkspaceInitializationPipeline& WorkspaceRuntime::Initialization() const {
     return initialization_;
 }
 
-ProjectTemplateService& WorkspaceRuntime::projectTemplates() {
-    return projectTemplates_;
+ProjectTemplateService& WorkspaceRuntime::ProjectTemplates() {
+    return project_templates_;
 }
 
-const ProjectTemplateService& WorkspaceRuntime::projectTemplates() const {
-    return projectTemplates_;
+const ProjectTemplateService& WorkspaceRuntime::ProjectTemplates() const {
+    return project_templates_;
 }
 
-ScratchFileService& WorkspaceRuntime::scratchFiles() {
-    return scratchFiles_;
+ScratchFileService& WorkspaceRuntime::ScratchFiles() {
+    return scratch_files_;
 }
 
-const ScratchFileService& WorkspaceRuntime::scratchFiles() const {
-    return scratchFiles_;
+const ScratchFileService& WorkspaceRuntime::ScratchFiles() const {
+    return scratch_files_;
 }
 
-ApprovalService& WorkspaceRuntime::approvals() {
+ApprovalService& WorkspaceRuntime::Approvals() {
     return approvals_;
 }
 
-const ApprovalService& WorkspaceRuntime::approvals() const {
+const ApprovalService& WorkspaceRuntime::Approvals() const {
     return approvals_;
 }
 
-SettingsService& WorkspaceRuntime::workspaceSettings() {
-    return workspaceSettings_;
+WorkspaceTrustService& WorkspaceRuntime::WorkspaceTrust() {
+    return workspace_trust_;
 }
 
-PluginStorageService& WorkspaceRuntime::pluginStorage() {
-    return pluginStorage_;
+const WorkspaceTrustService& WorkspaceRuntime::WorkspaceTrust() const {
+    return workspace_trust_;
 }
 
-ContributionRegistry& WorkspaceRuntime::contributions() {
-    return contributions_;
+SettingsService& WorkspaceRuntime::WorkspaceSettings() {
+    return workspace_settings_;
 }
 
-AsyncRuntime& WorkspaceRuntime::async() {
+LocalizationRegistry& WorkspaceRuntime::Localization() {
+    return localization_;
+}
+
+const LocalizationRegistry& WorkspaceRuntime::Localization() const {
+    return localization_;
+}
+
+PluginStorageService& WorkspaceRuntime::PluginStorage() {
+    return plugin_storage_;
+}
+
+RegistrationHandle WorkspaceRuntime::RegisterContribution(PluginRegistration contribution) {
+    RegistrationHandle registration = contributions_->RegisterContribution(std::move(contribution));
+    if (!registration.Registered()) {
+        return {};
+    }
+    Publish({
+        .kind = IdeEventKind::ContributionsChanged,
+        .source = "vanta.plugin",
+    });
+    auto registration_handle = std::make_shared<RegistrationHandle>(std::move(registration));
+    return RegistrationHandle([this, registration_handle] {
+        registration_handle->Unregister();
+        Publish({
+            .kind = IdeEventKind::ContributionsChanged,
+            .source = "vanta.plugin",
+        });
+    });
+}
+
+std::vector<PluginRegistration> WorkspaceRuntime::Contributions() const {
+    return contributions_->List();
+}
+
+std::vector<PluginRegistration> WorkspaceRuntime::Contributions(PluginRegistrationKind kind) const {
+    return contributions_->List(kind);
+}
+
+VirtualFileSystem& WorkspaceRuntime::FileSystems() {
+    return vfs_;
+}
+
+const VirtualFileSystem& WorkspaceRuntime::FileSystems() const {
+    return vfs_;
+}
+
+AsyncRuntime& WorkspaceRuntime::AsyncValue() {
     return async_;
 }
 
-UiStateStore& WorkspaceRuntime::ui() {
-    return ui_;
-}
-
-const UiStateStore& WorkspaceRuntime::ui() const {
-    return ui_;
-}
-
-WorkspaceContext& WorkspaceRuntime::context() {
+WorkspaceContext& WorkspaceRuntime::Context() {
     return context_;
 }
 
-const WorkspaceContext& WorkspaceRuntime::context() const {
+const WorkspaceContext& WorkspaceRuntime::Context() const {
     return context_;
 }
 
-std::uint64_t WorkspaceRuntime::onEvent(IdeEventBus::Listener listener) {
-    return events_.subscribe(std::move(listener));
+std::uint64_t WorkspaceRuntime::OnEvent(IdeEventBus::Listener listener) {
+    return events_.Subscribe(std::move(listener));
 }
 
-void WorkspaceRuntime::removeEventListener(std::uint64_t listenerId) {
-    events_.unsubscribe(listenerId);
+void WorkspaceRuntime::RemoveEventListener(std::uint64_t listener_id) {
+    events_.Unsubscribe(listener_id);
 }
 
-IdeEventBus& WorkspaceRuntime::events() {
+IdeEventBus& WorkspaceRuntime::EventsValue() {
     return events_;
 }
 
-void WorkspaceRuntime::publish(IdeEvent event) {
-    events_.publish(event);
+void WorkspaceRuntime::Publish(IdeEvent event) {
+    events_.Publish(event);
 }
 
-LayoutStateStore& WorkspaceRuntime::layoutComponent() {
-    auto* layout = project_.getComponent<LayoutStateStore>(LayoutStateStore::componentId);
-    if (layout == nullptr) {
-        project_.components().bind(std::make_unique<LayoutStateStore>());
-        layout = project_.getComponent<LayoutStateStore>(LayoutStateStore::componentId);
-    }
-    return *layout;
-}
-
-const LayoutStateStore& WorkspaceRuntime::layoutComponent() const {
-    const auto* layout = project_.getComponent<LayoutStateStore>(LayoutStateStore::componentId);
-    return *layout;
-}
-
-void WorkspaceRuntime::bindBuiltinComponents() {
-    if (project_.getComponent(LayoutStateStore::componentId) == nullptr) {
-        project_.components().bind(std::make_unique<LayoutStateStore>());
-    }
-    if (project_.getComponent(RunConfigurationComponent::componentId) == nullptr) {
-        project_.components().bind(std::make_unique<RunConfigurationComponent>());
+void WorkspaceRuntime::BindBuiltinComponents() {
+    if (project_.GetComponent(ProjectRunConfigurations::kComponentId) == nullptr) {
+        project_.Components().Bind(std::make_unique<ProjectRunConfigurations>());
     }
 }
 
-void WorkspaceRuntime::refreshIndexes(std::string title) {
-    initialization_.start(WorkspaceInitializationStage::FileIndexReady, "Refreshing indexes");
-    const JobId jobId = indexes_.refresh(context_, jobs_, async_, std::move(title));
-    jobs_.wait(jobId);
-    initialization_.complete(WorkspaceInitializationStage::FileIndexReady, "File index ready", Json::object({
-        {"snapshots", toJson(indexes_.snapshots())},
-    }));
-    updateCoreCapabilities();
+void WorkspaceRuntime::RefreshIndexes(std::string title) {
+    initialization_.Start(WorkspaceInitializationStage::FileIndexReady, "Refreshing indexes");
+    const JobId job_id = indexes_.Refresh(context_, std::move(title));
+    jobs_.Wait(job_id);
+    initialization_.Complete(WorkspaceInitializationStage::FileIndexReady, "File index Ready");
+    UpdateCoreCapabilities();
 }
 
-void WorkspaceRuntime::updateCoreCapabilities() {
-    capabilities_.set({
+void WorkspaceRuntime::UpdateCoreCapabilities() {
+    capabilities_.Set({
         .id = "workspace.open",
         .title = "Workspace Open",
-        .providerId = "vanta.core",
+        .provider_id = "vanta.core",
         .status = open_ ? CapabilityStatus::Available : CapabilityStatus::Unavailable,
         .message = open_ ? "Workspace is open" : "Workspace is closed",
-        .data = Json::object({
-            {"root", Json(workspace_.info().rootPath.string())},
-        }),
+        .details = {{"root", workspace_.Info().root_path.string()}},
     });
-    capabilities_.set({
+    capabilities_.Set({
         .id = "project.model",
         .title = "Project Model",
-        .providerId = "vanta.core",
-        .status = projectManager_.hasProject() ? CapabilityStatus::Available : CapabilityStatus::Degraded,
-        .message = projectManager_.hasProject() ? "Project model has facets or attachments" : "Generic project model is available",
-        .data = Json::object({
-            {"type", Json(primaryProjectType(project_.model()))},
-            {"origin", Json(toString(project_.model().origin))},
-        }),
+        .provider_id = "vanta.core",
+        .status = project_manager_.HasProject() ? CapabilityStatus::Available : CapabilityStatus::Degraded,
+        .message = project_manager_.HasProject() ? "Project model has facets or attachments" : "Generic project model is available",
+        .details = {
+            {"type", PrimaryProjectType(project_.Model())},
+            {"origin", ToString(project_.Model().origin)},
+        },
     });
-    capabilities_.set({
+    capabilities_.Set({
         .id = "index.workspace",
         .title = "Workspace Index",
-        .providerId = "vanta.core",
-        .status = indexes_.snapshots().empty() ? CapabilityStatus::Unavailable : CapabilityStatus::Available,
-        .message = indexes_.snapshots().empty() ? "No index snapshots are available" : "Index snapshots are ready",
-        .data = Json::object({
-            {"snapshots", toJson(indexes_.snapshots())},
-        }),
+        .provider_id = "vanta.core",
+        .status = indexes_.Snapshots().empty() ? CapabilityStatus::Unavailable : CapabilityStatus::Available,
+        .message = indexes_.Snapshots().empty() ? "No index snapshots are available" : "Index snapshots are Ready",
+        .details = {{"snapshots", std::to_string(indexes_.Snapshots().size())}},
     });
-    capabilities_.set({
+    capabilities_.Set({
         .id = "language.registry",
         .title = "Language Registry",
-        .providerId = "vanta.core",
+        .provider_id = "vanta.core",
         .status = CapabilityStatus::Available,
         .message = "Language registry is available",
-        .data = Json::object({
-            {"languageIds", stringsToJson(languages_.languageIds())},
-        }),
+        .details = {{"languageIds", JoinStrings(languages_->LanguageIds())}},
     });
-    capabilities_.set({
+    capabilities_.Set({
         .id = "build.providers",
         .title = "Build Providers",
-        .providerId = "vanta.core",
-        .status = build_.buildProviderIds().empty() ? CapabilityStatus::Degraded : CapabilityStatus::Available,
-        .message = build_.buildProviderIds().empty() ? "No build provider is registered" : "Build providers are registered",
-        .data = Json::object({
-            {"providerIds", stringsToJson(build_.buildProviderIds())},
-        }),
+        .provider_id = "vanta.core",
+        .status = build_->BuildProviderIds().empty() ? CapabilityStatus::Degraded : CapabilityStatus::Available,
+        .message = build_->BuildProviderIds().empty() ? "No build provider is registered" : "Build providers are registered",
+        .details = {{"providerIds", JoinStrings(build_->BuildProviderIds())}},
     });
-    capabilities_.set({
+    capabilities_.Set({
         .id = "agent.operations",
         .title = "Agent Operations",
-        .providerId = "vanta.core",
+        .provider_id = "vanta.core",
         .status = CapabilityStatus::Available,
         .message = "Agent operation protocol is available",
-        .data = Json::object({
-            {"records", Json(static_cast<std::int64_t>(agentOperationJournal_.records().size()))},
-        }),
+        .details = {{"records", std::to_string(agent_operation_journal_.Records().size())}},
     });
 }
 
-void WorkspaceRuntime::reconcileComponentContributions() {
-    const ProjectModel& model = project_.model();
-    for (auto it = activeContributedComponents_.begin(); it != activeContributedComponents_.end();) {
-        const auto contribution = componentContributions_.contribution(it->first);
-        if (!contribution || !contribution->match.matches(model)) {
-            unbindComponent(it->first);
-            it = activeContributedComponents_.erase(it);
+void WorkspaceRuntime::ReconcileComponentContributions() {
+    const ProjectModel& model = project_.Model();
+    for (auto it = active_contributed_components_.begin(); it != active_contributed_components_.end();) {
+        const auto contribution = component_contributions_.Contribution(it->first);
+        if (!contribution || !contribution->match.Matches(model)) {
+            UnbindComponent(it->first);
+            it = active_contributed_components_.erase(it);
         } else {
             ++it;
         }
     }
 
-    for (const ComponentContribution& contribution : componentContributions_.matching(model)) {
-        if (activeContributedComponents_.contains(contribution.id) || project_.getComponent(contribution.id) != nullptr) {
+    for (const ComponentContribution& contribution : component_contributions_.Matching(model)) {
+        if (active_contributed_components_.contains(contribution.id) || project_.GetComponent(contribution.id) != nullptr) {
             continue;
         }
         std::unique_ptr<Component> component = contribution.factory ? contribution.factory() : nullptr;
         if (component == nullptr) {
             continue;
         }
-        bindComponent(std::move(component));
-        activeContributedComponents_[contribution.id] = true;
+        BindComponent(std::move(component));
+        active_contributed_components_[contribution.id] = true;
     }
 }
 
-void WorkspaceRuntime::connectEventRelays() {
-    if (documentListener_ == 0) {
-        documentListener_ = documents_.onDidChangeDocument([this](const DocumentChangeEvent& event) {
-            publishDocumentEvent(event);
+void WorkspaceRuntime::ConnectEventRelays() {
+    if (document_listener_ == 0) {
+        document_listener_ = documents_.OnDidChangeDocument([this](const DocumentChangeEvent& event) {
+            PublishDocumentEvent(event);
         });
     }
-    if (diagnosticListener_ == 0) {
-        diagnosticListener_ = diagnostics_.onDidChangeDiagnostics([this](const DiagnosticChangeEvent& event) {
-            publish({
+    if (diagnostic_listener_ == 0) {
+        diagnostic_listener_ = diagnostics_.OnDidChangeDiagnostics([this](const DiagnosticChangeEvent& event) {
+            Publish({
                 .kind = IdeEventKind::DiagnosticsChanged,
                 .source = event.source,
             });
         });
     }
-    if (jobListener_ == 0) {
-        jobListener_ = jobs_.onDidChangeJob([this](const JobChangeEvent& event) {
-            publishJobEvent(event);
+    if (job_listener_ == 0) {
+        job_listener_ = jobs_.OnDidChangeJob([this](const JobChangeEvent& event) {
+            PublishJobEvent(event);
         });
     }
 }
 
-void WorkspaceRuntime::disconnectEventRelays() {
-    if (documentListener_ != 0) {
-        documents_.removeDocumentListener(documentListener_);
-        documentListener_ = 0;
+void WorkspaceRuntime::DisconnectEventRelays() {
+    if (document_listener_ != 0) {
+        documents_.RemoveDocumentListener(document_listener_);
+        document_listener_ = 0;
     }
-    if (diagnosticListener_ != 0) {
-        diagnostics_.removeDiagnosticsListener(diagnosticListener_);
-        diagnosticListener_ = 0;
+    if (diagnostic_listener_ != 0) {
+        diagnostics_.RemoveDiagnosticsListener(diagnostic_listener_);
+        diagnostic_listener_ = 0;
     }
-    if (jobListener_ != 0) {
-        jobs_.removeJobListener(jobListener_);
-        jobListener_ = 0;
+    if (job_listener_ != 0) {
+        jobs_.RemoveJobListener(job_listener_);
+        job_listener_ = 0;
     }
-    jobStatuses_.clear();
+    job_statuses_.clear();
 }
 
-void WorkspaceRuntime::handleFileChange(const VirtualFileChangeEvent& event) {
+void WorkspaceRuntime::HandleFileChange(const VirtualFileChangeEvent& event) {
     if (!open_) {
         return;
     }
-    workspace_.refreshFileTree();
-    publish({
-        .kind = ideEventKindFromFileChange(event.kind),
+    Publish({
+        .kind = IdeEventKindFromFileChange(event.kind),
         .file = event.file,
-        .message = toString(event.kind),
+        .message = ToString(event.kind),
     });
-    refreshProject();
+    RefreshProject();
 }
 
-void WorkspaceRuntime::publishDocumentEvent(const DocumentChangeEvent& event) {
-    publish({
-        .kind = kindFromDocumentChange(event.kind),
+void WorkspaceRuntime::PublishDocumentEvent(const DocumentChangeEvent& event) {
+    Publish({
+        .kind = KindFromDocumentChange(event.kind),
         .file = event.file,
     });
 }
 
-void WorkspaceRuntime::publishJobEvent(const JobChangeEvent& event) {
-    const auto previous = jobStatuses_.find(event.job.id);
-    const bool firstStatus = previous == jobStatuses_.end();
-    const JobStatus oldStatus = firstStatus ? JobStatus::Pending : previous->second;
-    jobStatuses_[event.job.id] = event.job.status;
+void WorkspaceRuntime::PublishJobEvent(const JobChangeEvent& event) {
+    const auto previous = job_statuses_.find(event.job.id);
+    const bool first_status = previous == job_statuses_.end();
+    const JobStatus old_status = first_status ? JobStatus::Pending : previous->second;
+    job_statuses_[event.job.id] = event.job.status;
 
-    if (event.job.status == JobStatus::Running && oldStatus != JobStatus::Running) {
-        publish({
+    if (event.job.status == JobStatus::Running && old_status != JobStatus::Running) {
+        Publish({
             .kind = IdeEventKind::JobStarted,
-            .source = toString(event.job.kind),
+            .source = ToString(event.job.kind),
             .message = event.job.title,
-            .jobId = event.job.id,
+            .job_id = event.job.id,
         });
-    } else if (isTerminalStatus(event.job.status) && oldStatus != event.job.status) {
-        publish({
+    } else if (IsTerminalStatus(event.job.status) && old_status != event.job.status) {
+        Publish({
             .kind = IdeEventKind::JobCompleted,
-            .source = toString(event.job.kind),
+            .source = ToString(event.job.kind),
             .message = event.job.title,
-            .jobId = event.job.id,
+            .job_id = event.job.id,
         });
     }
 }

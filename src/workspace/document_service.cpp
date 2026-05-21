@@ -4,17 +4,17 @@
 
 namespace vanta {
 
-TextDocument* DocumentService::openDocument(const VirtualFile& file, std::string* errorMessage) {
-    const Uri key = file.toUri();
+TextDocument* DocumentService::OpenDocument(const VirtualFile& file, std::string* error_message) {
+    const Uri key = file.ToUri();
     auto existing = documents_.find(key);
     if (existing != documents_.end()) {
         return &existing->second;
     }
 
-    auto text = file.readText();
+    auto text = file.ReadText();
     if (!text) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Document is not readable";
+        if (error_message != nullptr) {
+            *error_message = "Document is not readable";
         }
         return nullptr;
     }
@@ -24,41 +24,41 @@ TextDocument* DocumentService::openDocument(const VirtualFile& file, std::string
     document.text = *text;
     auto [it, inserted] = documents_.emplace(key, std::move(document));
     (void)inserted;
-    publishChange(it->second, DocumentChangeKind::Opened);
+    PublishChange(it->second, DocumentChangeKind::Opened);
     return &it->second;
 }
 
-bool DocumentService::closeDocument(const VirtualFile& file) {
-    const Uri key = file.toUri();
+bool DocumentService::CloseDocument(const VirtualFile& file) {
+    const Uri key = file.ToUri();
     auto it = documents_.find(key);
     if (it == documents_.end()) {
         return false;
     }
-    publishChange(it->second, DocumentChangeKind::Closed);
+    PublishChange(it->second, DocumentChangeKind::Closed);
     documents_.erase(it);
     return true;
 }
 
-const TextDocument* DocumentService::document(const VirtualFile& file) const {
-    auto it = documents_.find(file.toUri());
+const TextDocument* DocumentService::Document(const VirtualFile& file) const {
+    auto it = documents_.find(file.ToUri());
     return it == documents_.end() ? nullptr : &it->second;
 }
 
-TextDocument* DocumentService::document(const VirtualFile& file) {
-    auto it = documents_.find(file.toUri());
+TextDocument* DocumentService::Document(const VirtualFile& file) {
+    auto it = documents_.find(file.ToUri());
     return it == documents_.end() ? nullptr : &it->second;
 }
 
-std::optional<TextDocument> DocumentService::snapshot(const VirtualFile& file) const {
-    const TextDocument* found = document(file);
+std::optional<TextDocument> DocumentService::Snapshot(const VirtualFile& file) const {
+    const TextDocument* found = Document(file);
     if (found == nullptr) {
         return std::nullopt;
     }
     return *found;
 }
 
-std::optional<DocumentSnapshot> DocumentService::readSnapshot(const VirtualFile& file) const {
-    if (const TextDocument* found = document(file)) {
+std::optional<DocumentSnapshot> DocumentService::ReadSnapshot(const VirtualFile& file) const {
+    if (const TextDocument* found = Document(file)) {
         return DocumentSnapshot{
             .file = found->file,
             .text = found->text,
@@ -68,7 +68,7 @@ std::optional<DocumentSnapshot> DocumentService::readSnapshot(const VirtualFile&
         };
     }
 
-    auto text = file.readText();
+    auto text = file.ReadText();
     if (!text) {
         return std::nullopt;
     }
@@ -81,15 +81,15 @@ std::optional<DocumentSnapshot> DocumentService::readSnapshot(const VirtualFile&
     };
 }
 
-std::optional<std::string> DocumentService::readText(const VirtualFile& file) const {
-    auto read = readSnapshot(file);
+std::optional<std::string> DocumentService::ReadText(const VirtualFile& file) const {
+    auto read = ReadSnapshot(file);
     if (!read) {
         return std::nullopt;
     }
     return read->text;
 }
 
-std::vector<VirtualFile> DocumentService::openDocuments() const {
+std::vector<VirtualFile> DocumentService::OpenDocuments() const {
     std::vector<VirtualFile> result;
     for (const auto& [uri, document] : documents_) {
         (void)uri;
@@ -98,17 +98,17 @@ std::vector<VirtualFile> DocumentService::openDocuments() const {
     return result;
 }
 
-bool DocumentService::setText(const VirtualFile& file, std::string text, std::uint64_t expectedVersion, std::string* errorMessage) {
-    TextDocument* found = document(file);
+bool DocumentService::SetText(const VirtualFile& file, std::string text, std::uint64_t expected_version, std::string* error_message) {
+    TextDocument* found = Document(file);
     if (found == nullptr) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Document is not open";
+        if (error_message != nullptr) {
+            *error_message = "Document is not open";
         }
         return false;
     }
-    if (expectedVersion != 0 && found->version != expectedVersion) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Document version changed";
+    if (expected_version != 0 && found->version != expected_version) {
+        if (error_message != nullptr) {
+            *error_message = "Document version changed";
         }
         return false;
     }
@@ -116,69 +116,69 @@ bool DocumentService::setText(const VirtualFile& file, std::string text, std::ui
     found->text = std::move(text);
     ++found->version;
     found->dirty = true;
-    publishChange(*found, DocumentChangeKind::Changed);
+    PublishChange(*found, DocumentChangeKind::Changed);
     return true;
 }
 
-bool DocumentService::applyEdit(const VirtualFile& file, const TextEdit& edit, std::uint64_t expectedVersion, std::string* errorMessage) {
-    TextDocument* found = document(file);
+bool DocumentService::ApplyEdit(const VirtualFile& file, const TextEdit& edit, std::uint64_t expected_version, std::string* error_message) {
+    TextDocument* found = Document(file);
     if (found == nullptr) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Document is not open";
+        if (error_message != nullptr) {
+            *error_message = "Document is not open";
         }
         return false;
     }
-    return setText(file, applyTextEdit(found->text, edit), expectedVersion, errorMessage);
+    return SetText(file, ApplyTextEdit(found->text, edit), expected_version, error_message);
 }
 
-bool DocumentService::applyEdits(const VirtualFile& file, const std::vector<TextEdit>& edits, std::uint64_t expectedVersion, std::string* errorMessage) {
-    TextDocument* found = document(file);
+bool DocumentService::ApplyEdits(const VirtualFile& file, const std::vector<TextEdit>& edits, std::uint64_t expected_version, std::string* error_message) {
+    TextDocument* found = Document(file);
     if (found == nullptr) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Document is not open";
+        if (error_message != nullptr) {
+            *error_message = "Document is not open";
         }
         return false;
     }
-    if (expectedVersion != 0 && found->version != expectedVersion) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Document version changed";
+    if (expected_version != 0 && found->version != expected_version) {
+        if (error_message != nullptr) {
+            *error_message = "Document version changed";
         }
         return false;
     }
 
     std::string text = found->text;
     for (auto it = edits.rbegin(); it != edits.rend(); ++it) {
-        text = applyTextEdit(text, *it);
+        text = ApplyTextEdit(text, *it);
     }
-    return setText(file, std::move(text), expectedVersion, errorMessage);
+    return SetText(file, std::move(text), expected_version, error_message);
 }
 
-bool DocumentService::saveDocument(const VirtualFile& file, std::string* errorMessage) {
-    TextDocument* found = document(file);
+bool DocumentService::SaveDocument(const VirtualFile& file, std::string* error_message) {
+    TextDocument* found = Document(file);
     if (found == nullptr) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Document is not open";
+        if (error_message != nullptr) {
+            *error_message = "Document is not open";
         }
         return false;
     }
-    if (!found->file.writeText(found->text, errorMessage)) {
+    if (!found->file.WriteText(found->text, error_message)) {
         return false;
     }
     found->dirty = false;
-    publishChange(*found, DocumentChangeKind::Saved);
+    PublishChange(*found, DocumentChangeKind::Saved);
     return true;
 }
 
-std::uint64_t DocumentService::onDidChangeDocument(EventBus<DocumentChangeEvent>::Listener listener) {
-    return onDidChange_.subscribe(std::move(listener));
+std::uint64_t DocumentService::OnDidChangeDocument(EventBus<DocumentChangeEvent>::Listener listener) {
+    return on_did_change_.Subscribe(std::move(listener));
 }
 
-void DocumentService::removeDocumentListener(std::uint64_t listenerId) {
-    onDidChange_.unsubscribe(listenerId);
+void DocumentService::RemoveDocumentListener(std::uint64_t listener_id) {
+    on_did_change_.Unsubscribe(listener_id);
 }
 
-void DocumentService::publishChange(const TextDocument& document, DocumentChangeKind kind) {
-    onDidChange_.publish({
+void DocumentService::PublishChange(const TextDocument& document, DocumentChangeKind kind) {
+    on_did_change_.Publish({
         .file = document.file,
         .kind = kind,
         .version = document.version,

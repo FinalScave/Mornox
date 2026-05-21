@@ -26,12 +26,12 @@ class FileWatcher {
 public:
     virtual ~FileWatcher() = default;
 
-    virtual bool start(const VirtualFile& root, FileWatchCallback callback, std::string* errorMessage = nullptr) = 0;
-    virtual void stop() = 0;
-    virtual bool running() const = 0;
+    virtual bool Start(const VirtualFile& root, FileWatchCallback callback, std::string* error_message = nullptr) = 0;
+    virtual void Stop() = 0;
+    virtual bool Running() const = 0;
 };
 
-std::unique_ptr<FileWatcher> createPlatformFileWatcher(const VirtualFileSystem& vfs);
-std::string toString(VirtualFileChangeKind kind);
+std::unique_ptr<FileWatcher> CreatePlatformFileWatcher(const VirtualFileSystem& vfs);
+std::string ToString(VirtualFileChangeKind kind);
 
 }

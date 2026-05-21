@@ -1,21 +1,27 @@
-#include "vanta/plugin/contribution_registry.h"
+#include "plugin/contribution_registry.h"
+
+#include <utility>
 
 namespace vanta {
 
-void ContributionRegistry::add(Contribution contribution) {
+RegistrationHandle ContributionRegistry::RegisterContribution(PluginRegistration contribution) {
     if (contribution.id.empty()) {
-        return;
+        return {};
     }
-    contributions_[contribution.id] = std::move(contribution);
+    const std::string id = contribution.id;
+    contributions_[id] = std::move(contribution);
+    return RegistrationHandle([this, id] {
+        Remove(id);
+    });
 }
 
-void ContributionRegistry::remove(const std::string& id) {
+void ContributionRegistry::Remove(const std::string& id) {
     contributions_.erase(id);
 }
 
-void ContributionRegistry::removePlugin(const std::string& pluginId) {
+void ContributionRegistry::RemovePlugin(const std::string& plugin_id) {
     for (auto it = contributions_.begin(); it != contributions_.end();) {
-        if (it->second.pluginId == pluginId) {
+        if (it->second.plugin_id == plugin_id) {
             it = contributions_.erase(it);
         } else {
             ++it;
@@ -23,17 +29,17 @@ void ContributionRegistry::removePlugin(const std::string& pluginId) {
     }
 }
 
-void ContributionRegistry::clear() {
+void ContributionRegistry::Clear() {
     contributions_.clear();
 }
 
-std::optional<Contribution> ContributionRegistry::contribution(const std::string& id) const {
+std::optional<PluginRegistration> ContributionRegistry::Contribution(const std::string& id) const {
     auto it = contributions_.find(id);
-    return it == contributions_.end() ? std::nullopt : std::optional<Contribution>(it->second);
+    return it == contributions_.end() ? std::nullopt : std::optional<PluginRegistration>(it->second);
 }
 
-std::vector<Contribution> ContributionRegistry::list() const {
-    std::vector<Contribution> result;
+std::vector<PluginRegistration> ContributionRegistry::List() const {
+    std::vector<PluginRegistration> result;
     for (const auto& [id, contribution] : contributions_) {
         (void)id;
         result.push_back(contribution);
@@ -41,8 +47,8 @@ std::vector<Contribution> ContributionRegistry::list() const {
     return result;
 }
 
-std::vector<Contribution> ContributionRegistry::list(ContributionKind kind) const {
-    std::vector<Contribution> result;
+std::vector<PluginRegistration> ContributionRegistry::List(PluginRegistrationKind kind) const {
+    std::vector<PluginRegistration> result;
     for (const auto& [id, contribution] : contributions_) {
         (void)id;
         if (contribution.kind == kind) {
@@ -52,73 +58,47 @@ std::vector<Contribution> ContributionRegistry::list(ContributionKind kind) cons
     return result;
 }
 
-std::vector<Contribution> ContributionRegistry::listByPlugin(const std::string& pluginId) const {
-    std::vector<Contribution> result;
+std::vector<PluginRegistration> ContributionRegistry::ListByPlugin(const std::string& plugin_id) const {
+    std::vector<PluginRegistration> result;
     for (const auto& [id, contribution] : contributions_) {
         (void)id;
-        if (contribution.pluginId == pluginId) {
+        if (contribution.plugin_id == plugin_id) {
             result.push_back(contribution);
         }
     }
     return result;
 }
 
-std::string toString(ContributionKind kind) {
-    switch (kind) {
-    case ContributionKind::Command:
-        return "command";
-    case ContributionKind::View:
-        return "view";
-    case ContributionKind::Menu:
-        return "menu";
-    case ContributionKind::LanguageService:
-        return "languageService";
-    case ContributionKind::FileSystemProvider:
-        return "fileSystemProvider";
-    case ContributionKind::AgentTool:
-        return "agentTool";
-    case ContributionKind::AgentContextProvider:
-        return "agentContextProvider";
-    case ContributionKind::RunConfiguration:
-        return "runConfiguration";
-    case ContributionKind::DiagnosticProvider:
-        return "diagnosticProvider";
-    case ContributionKind::Component:
-        return "component";
-    }
-    return "command";
-}
-
-std::optional<ContributionKind> contributionKindFromString(const std::string& value) {
+std::optional<PluginRegistrationKind> ContributionKindFromString(const std::string& value) {
     if (value == "command" || value == "commands") {
-        return ContributionKind::Command;
+        return PluginRegistrationKind::Command;
     }
     if (value == "view" || value == "views") {
-        return ContributionKind::View;
+        return PluginRegistrationKind::View;
     }
     if (value == "menu" || value == "menus") {
-        return ContributionKind::Menu;
+        return PluginRegistrationKind::Menu;
     }
     if (value == "languageService" || value == "languageServices") {
-        return ContributionKind::LanguageService;
+        return PluginRegistrationKind::LanguageService;
     }
     if (value == "fileSystemProvider" || value == "fileSystemProviders") {
-        return ContributionKind::FileSystemProvider;
+        return PluginRegistrationKind::FileSystemProvider;
     }
     if (value == "agentTool" || value == "agentTools") {
-        return ContributionKind::AgentTool;
+        return PluginRegistrationKind::AgentTool;
     }
     if (value == "agentContextProvider" || value == "agentContextProviders") {
-        return ContributionKind::AgentContextProvider;
+        return PluginRegistrationKind::AgentContextProvider;
     }
     if (value == "runConfiguration" || value == "runConfigurations") {
-        return ContributionKind::RunConfiguration;
+        return PluginRegistrationKind::RunConfiguration;
     }
     if (value == "diagnosticProvider" || value == "diagnosticProviders") {
-        return ContributionKind::DiagnosticProvider;
+        return PluginRegistrationKind::DiagnosticProvider;
     }
     if (value == "component" || value == "components") {
-        return ContributionKind::Component;
+        return PluginRegistrationKind::Component;
     }
     return std::nullopt;
 }

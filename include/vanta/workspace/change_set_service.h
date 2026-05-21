@@ -22,11 +22,11 @@ enum class WorkspaceEditOperationKind {
 struct WorkspaceEditOperation {
     WorkspaceEditOperationKind kind = WorkspaceEditOperationKind::ReplaceFile;
     VirtualFile file;
-    VirtualFile targetFile;
-    std::string originalText;
-    std::string replacementText;
-    std::vector<TextEdit> textEdits;
-    std::uint64_t expectedDocumentVersion = 0;
+    VirtualFile target_file;
+    std::string original_text;
+    std::string replacement_text;
+    std::vector<TextEdit> text_edits;
+    std::uint64_t expected_document_version = 0;
 };
 
 struct WorkspaceEdit {
@@ -34,9 +34,9 @@ struct WorkspaceEdit {
 };
 
 struct WorkspaceEditConflict {
-    WorkspaceEditOperationKind operationKind = WorkspaceEditOperationKind::ReplaceFile;
+    WorkspaceEditOperationKind operation_kind = WorkspaceEditOperationKind::ReplaceFile;
     VirtualFile file;
-    VirtualFile targetFile;
+    VirtualFile target_file;
     std::string message;
 };
 
@@ -50,6 +50,7 @@ enum class ChangeSetStatus {
     Approved,
     Rejected,
     Applied,
+    Undone,
 };
 
 struct ChangeSet {
@@ -57,12 +58,14 @@ struct ChangeSet {
     std::string source;
     std::string title;
     WorkspaceEdit edit;
-    std::string unifiedDiff;
+    WorkspaceEdit inverse_edit;
+    std::string unified_diff;
+    std::string undo_token;
     ChangeSetStatus status = ChangeSetStatus::Pending;
 };
 
 struct ChangeSetApplyOptions {
-    bool saveAfterApply = false;
+    bool save_after_apply = false;
     bool preflight = true;
 };
 
@@ -73,62 +76,68 @@ struct ChangeSetResult {
 
 class ChangeSetService {
 public:
-    ChangeSet create(
+    ChangeSet Create(
         std::string source,
         std::string title,
         WorkspaceEdit edit);
 
-    ChangeSet createFileReplacement(
+    ChangeSet CreateFileReplacement(
         VirtualFile file,
         std::string source,
         std::string title,
-        std::string originalText,
-        std::string replacementText,
-        std::uint64_t expectedDocumentVersion = 0);
-    ChangeSet createFileCreation(
+        std::string original_text,
+        std::string replacement_text,
+        std::uint64_t expected_document_version = 0);
+    ChangeSet CreateFileCreation(
         VirtualFile file,
         std::string source,
         std::string title,
         std::string text);
-    ChangeSet createFileDeletion(
+    ChangeSet CreateFileDeletion(
         VirtualFile file,
         std::string source,
         std::string title,
-        std::string originalText);
-    ChangeSet createFileRename(
+        std::string original_text);
+    ChangeSet CreateFileRename(
         VirtualFile file,
-        VirtualFile targetFile,
+        VirtualFile target_file,
         std::string source,
         std::string title);
 
-    std::optional<ChangeSet> changeSet(const std::string& id) const;
-    std::vector<ChangeSet> changeSets() const;
-    WorkspaceEditPreflight preflight(
+    std::optional<ChangeSet> Get(const std::string& id) const;
+    std::vector<ChangeSet> List() const;
+    WorkspaceEditPreflight Preflight(
         Workspace& workspace,
         DocumentService& documents,
         const std::string& id) const;
-    ChangeSetResult approve(const std::string& id);
-    ChangeSetResult reject(const std::string& id);
-    ChangeSetResult applyApproved(
+    ChangeSetResult Approve(const std::string& id);
+    ChangeSetResult Reject(const std::string& id);
+    ChangeSetResult ApplyApproved(
+        Workspace& workspace,
+        DocumentService& documents,
+        const std::string& id,
+        ChangeSetApplyOptions options = {});
+    ChangeSetResult UndoApplied(
         Workspace& workspace,
         DocumentService& documents,
         const std::string& id,
         ChangeSetApplyOptions options = {});
 
 private:
-    ChangeSet* mutableChangeSet(const std::string& id);
-    WorkspaceEditPreflight preflightOperation(DocumentService& documents, const WorkspaceEditOperation& operation) const;
-    ChangeSetResult applyOperation(DocumentService& documents, const WorkspaceEditOperation& operation, ChangeSetApplyOptions options) const;
+    ChangeSet* MutableChangeSet(const std::string& id);
+    WorkspaceEdit CreateInverseEdit(DocumentService& documents, const WorkspaceEdit& edit) const;
+    WorkspaceEditPreflight PreflightOperation(DocumentService& documents, const WorkspaceEditOperation& operation) const;
+    ChangeSetResult ApplyOperation(DocumentService& documents, const WorkspaceEditOperation& operation, ChangeSetApplyOptions options) const;
 
-    std::map<std::string, ChangeSet> changeSets_;
-    std::uint64_t nextChangeSetId_ = 1;
+    std::map<std::string, ChangeSet> change_sets_;
+    std::uint64_t next_change_set_id_ = 1;
 };
 
-std::string toString(WorkspaceEditOperationKind kind);
-std::string toString(ChangeSetStatus status);
-std::string createUnifiedDiff(
+std::string ToString(WorkspaceEditOperationKind kind);
+std::string ToString(ChangeSetStatus status);
+std::string CreateUnifiedDiff(
     const VirtualFile& file,
-    const std::string& originalText,
-    const std::string& replacementText);
+    const std::string& original_text,
+    const std::string& replacement_text);
 
 }

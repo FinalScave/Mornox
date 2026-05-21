@@ -28,19 +28,19 @@ public:
     VirtualFile() = default;
     VirtualFile(Uri uri, const VirtualFileSystem* vfs);
 
-    bool valid() const noexcept;
-    const Uri& uri() const noexcept;
-    Uri toUri() const;
-    std::string displayName() const;
-    std::string extension() const;
+    bool Valid() const noexcept;
+    const Uri& UriValue() const noexcept;
+    Uri ToUri() const;
+    std::string DisplayName() const;
+    std::string Extension() const;
 
-    bool exists() const;
-    FileStat stat() const;
-    std::optional<VirtualFile> parent() const;
-    std::vector<VirtualFile> listChildren() const;
-    std::optional<std::string> readText() const;
-    bool writeText(const std::string& text, std::string* errorMessage = nullptr) const;
-    std::optional<std::filesystem::path> localPath() const;
+    bool Exists() const;
+    FileStat Stat() const;
+    std::optional<VirtualFile> Parent() const;
+    std::vector<VirtualFile> ListChildren() const;
+    std::optional<std::string> ReadText() const;
+    bool WriteText(const std::string& text, std::string* error_message = nullptr) const;
+    std::optional<std::filesystem::path> LocalPath() const;
 
     bool operator==(const VirtualFile& other) const noexcept;
     bool operator!=(const VirtualFile& other) const noexcept;

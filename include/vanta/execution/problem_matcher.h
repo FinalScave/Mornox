@@ -10,7 +10,7 @@
 namespace vanta {
 
 struct ProblemMatch {
-    std::string filePath;
+    std::string file_path;
     int line = 0;
     int column = 0;
     DiagnosticSeverity severity = DiagnosticSeverity::Note;
@@ -20,21 +20,21 @@ struct ProblemMatch {
 
 class ProblemMatcher {
 public:
-    std::vector<ProblemMatch> matchCompilerOutput(const std::string& output) const;
+    std::vector<ProblemMatch> MatchCompilerOutput(const std::string& output) const;
 };
 
 class DiagnosticResolver {
 public:
-    std::vector<Diagnostic> resolve(
+    std::vector<Diagnostic> Resolve(
         const std::vector<ProblemMatch>& matches,
         const Workspace& workspace,
-        const std::filesystem::path& buildDirectory = {}) const;
+        const std::filesystem::path& build_directory = {}) const;
 
 private:
-    VirtualFile resolveFile(
+    VirtualFile ResolveFile(
         const ProblemMatch& match,
         const Workspace& workspace,
-        const std::filesystem::path& buildDirectory) const;
+        const std::filesystem::path& build_directory) const;
 };
 
 }

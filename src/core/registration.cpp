@@ -5,7 +5,7 @@
 namespace vanta {
 
 RegistrationHandle::RegistrationHandle(std::function<void()> unregister)
-    : unregister_(std::move(unregister)), registered_(true) {}
+    : unregister_callback_(std::move(unregister)), registered_(true) {}
 
 RegistrationHandle::RegistrationHandle(RegistrationHandle&& other) noexcept {
     *this = std::move(other);
@@ -13,8 +13,8 @@ RegistrationHandle::RegistrationHandle(RegistrationHandle&& other) noexcept {
 
 RegistrationHandle& RegistrationHandle::operator=(RegistrationHandle&& other) noexcept {
     if (this != &other) {
-        unregister();
-        unregister_ = std::move(other.unregister_);
+        Unregister();
+        unregister_callback_ = std::move(other.unregister_callback_);
         registered_ = other.registered_;
         other.registered_ = false;
     }
@@ -22,20 +22,21 @@ RegistrationHandle& RegistrationHandle::operator=(RegistrationHandle&& other) no
 }
 
 RegistrationHandle::~RegistrationHandle() {
-    unregister();
+    // Registration handles are explicit lifecycle tokens. Call Unregister when
+    // a registration should be removed.
 }
 
-void RegistrationHandle::unregister() noexcept {
+void RegistrationHandle::Unregister() noexcept {
     if (!registered_) {
         return;
     }
     registered_ = false;
-    if (unregister_) {
-        unregister_();
+    if (unregister_callback_) {
+        unregister_callback_();
     }
 }
 
-bool RegistrationHandle::registered() const noexcept {
+bool RegistrationHandle::Registered() const noexcept {
     return registered_;
 }
 

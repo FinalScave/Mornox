@@ -2,7 +2,7 @@
 
 namespace vanta {
 
-std::string toString(IdeEventKind kind) {
+std::string ToString(IdeEventKind kind) {
     switch (kind) {
     case IdeEventKind::WorkspaceOpened:
         return "workspace.opened";
@@ -34,11 +34,13 @@ std::string toString(IdeEventKind kind) {
         return "changeSet.proposed";
     case IdeEventKind::ChangeSetApplied:
         return "changeSet.applied";
+    case IdeEventKind::ContributionsChanged:
+        return "contributions.changed";
     }
     return "workspace.opened";
 }
 
-IdeEventKind ideEventKindFromFileChange(VirtualFileChangeKind kind) {
+IdeEventKind IdeEventKindFromFileChange(VirtualFileChangeKind kind) {
     switch (kind) {
     case VirtualFileChangeKind::Created:
         return IdeEventKind::FileCreated;

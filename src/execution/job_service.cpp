@@ -3,12 +3,12 @@
 #include <exception>
 #include <utility>
 
-#include "vanta/execution/execution_protocol.h"
+#include "vanta/core/json_codec.h"
 
 namespace vanta {
 namespace {
 
-bool terminal(JobStatus status) {
+bool IsTerminalStatus(JobStatus status) {
     return status == JobStatus::Succeeded || status == JobStatus::Failed || status == JobStatus::Cancelled;
 }
 
@@ -17,140 +17,139 @@ bool terminal(JobStatus status) {
 JobContext::JobContext(JobService& service, JobId id)
     : service_(&service), id_(id) {}
 
-JobId JobContext::id() const {
+JobId JobContext::Id() const {
     return id_;
 }
 
-bool JobContext::cancellationRequested() const {
-    return service_ != nullptr && service_->cancellationRequested(id_);
+bool JobContext::CancellationRequested() const {
+    return service_ != nullptr && service_->CancellationRequested(id_);
 }
 
-void JobContext::report(double progress, std::string message) const {
+void JobContext::Report(double progress, std::string message) const {
     if (service_ != nullptr) {
-        service_->updateProgress(id_, progress, std::move(message));
+        service_->UpdateProgress(id_, progress, std::move(message));
     }
 }
 
-void JobContext::appendOutput(const std::string& output) const {
+void JobContext::AppendOutput(const std::string& output) const {
     if (service_ != nullptr) {
-        service_->appendOutput(id_, output);
+        service_->AppendOutput(id_, output);
     }
 }
 
-void JobContext::setData(Json data) const {
+void JobContext::SetPayload(Value payload) const {
     if (service_ != nullptr) {
-        service_->setData(id_, std::move(data));
+        service_->SetPayload(id_, std::move(payload));
     }
 }
 
 JobHandle::JobHandle(JobService& service, JobId id)
     : service_(&service), id_(id) {}
 
-JobId JobHandle::id() const {
+JobId JobHandle::Id() const {
     return id_;
 }
 
-bool JobHandle::valid() const {
+bool JobHandle::Valid() const {
     return service_ != nullptr && id_ != 0;
 }
 
-bool JobHandle::cancel() {
-    return service_ != nullptr && service_->requestCancel(id_);
+bool JobHandle::Cancel() {
+    return service_ != nullptr && service_->RequestCancel(id_);
 }
 
-std::optional<JobRecord> JobHandle::record() const {
-    return service_ == nullptr ? std::nullopt : service_->job(id_);
+std::optional<JobRecord> JobHandle::Record() const {
+    return service_ == nullptr ? std::nullopt : service_->Job(id_);
 }
 
-std::optional<JobRecord> JobHandle::wait() const {
-    return service_ == nullptr ? std::nullopt : service_->wait(id_);
+std::optional<JobRecord> JobHandle::Wait() const {
+    return service_ == nullptr ? std::nullopt : service_->Wait(id_);
 }
 
-JobId JobService::create(JobKind kind, std::string title, std::vector<JobId> dependencies) {
+JobId JobService::Create(JobKind kind, std::string title, std::vector<JobId> dependencies) {
     JobRecord record;
     record.kind = kind;
     record.title = std::move(title);
     record.dependencies = std::move(dependencies);
-    record.data = Json::object();
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        record.id = nextJobId_++;
+        record.id = next_job_id_++;
         jobs_[record.id] = record;
         record = jobs_.at(record.id);
     }
     changed_.notify_all();
-    publish(record);
+    Publish(record);
     return record.id;
 }
 
-JobId JobService::start(JobKind kind, std::string title, std::vector<JobId> dependencies) {
-    const JobId id = create(kind, std::move(title), std::move(dependencies));
-    markRunning(id);
+JobId JobService::Start(JobKind kind, std::string title, std::vector<JobId> dependencies) {
+    const JobId id = Create(kind, std::move(title), std::move(dependencies));
+    MarkRunning(id);
     return id;
 }
 
-JobHandle JobService::submit(AsyncRuntime& runtime, JobRequest request, JobFunction function, JobThread thread) {
-    const JobId id = create(request.kind, std::move(request.title), std::move(request.dependencies));
-    setCancellable(id, request.cancellable);
-    if (!request.data.isNull()) {
-        setData(id, std::move(request.data));
+JobHandle JobService::Submit(AsyncRuntime& runtime, JobRequest request, JobFunction function, JobThread thread) {
+    const JobId id = Create(request.kind, std::move(request.title), std::move(request.dependencies));
+    SetCancellable(id, request.cancellable);
+    if (request.payload.has_value()) {
+        SetPayload(id, std::move(*request.payload));
     }
 
-    return submit(runtime, id, std::move(function), thread);
+    return Submit(runtime, id, std::move(function), thread);
 }
 
-JobHandle JobService::submit(AsyncRuntime& runtime, JobId id, JobFunction function, JobThread thread) {
-    if (!job(id)) {
+JobHandle JobService::Submit(AsyncRuntime& runtime, JobId id, JobFunction function, JobThread thread) {
+    if (!Job(id)) {
         return {};
     }
 
     auto task = [this, id, function = std::move(function)]() mutable {
-        if (!ready(id)) {
-            complete(id, false, "Job dependencies are not ready");
+        if (!Ready(id)) {
+            Complete(id, false, "Job dependencies are not ready");
             return;
         }
-        markRunning(id);
+        MarkRunning(id);
         JobContext context(*this, id);
         try {
             JobResult result = function(context);
-            if (!result.data.isNull()) {
-                setData(id, std::move(result.data));
+            if (result.payload.has_value()) {
+                SetPayload(id, std::move(*result.payload));
             }
-            if (!isTerminal(id)) {
-                if (cancellationRequested(id)) {
-                    cancel(id, result.message.empty() ? "Job cancelled" : result.message);
+            if (!IsTerminal(id)) {
+                if (CancellationRequested(id)) {
+                    Cancel(id, result.message.empty() ? "Job cancelled" : result.message);
                 } else {
-                    complete(id, result.success, std::move(result.message));
+                    Complete(id, result.success, std::move(result.message));
                 }
             }
         } catch (const std::exception& error) {
-            if (!isTerminal(id)) {
-                complete(id, false, error.what());
+            if (!IsTerminal(id)) {
+                Complete(id, false, error.what());
             }
         } catch (...) {
-            if (!isTerminal(id)) {
-                complete(id, false, "Job failed");
+            if (!IsTerminal(id)) {
+                Complete(id, false, "Job failed");
             }
         }
     };
 
     if (thread == JobThread::Main) {
-        runtime.postMain(std::move(task));
+        runtime.PostMain(std::move(task));
     } else {
-        runtime.postWorker(std::move(task));
+        runtime.PostWorker(std::move(task));
     }
     return JobHandle(*this, id);
 }
 
-void JobService::markRunning(JobId id, std::string message) {
-    update(id, [&](JobRecord& record) {
+void JobService::MarkRunning(JobId id, std::string message) {
+    Update(id, [&](JobRecord& record) {
         record.status = JobStatus::Running;
         record.message = std::move(message);
     });
 }
 
-void JobService::updateProgress(JobId id, double progress, std::string message) {
-    update(id, [&](JobRecord& record) {
+void JobService::UpdateProgress(JobId id, double progress, std::string message) {
+    Update(id, [&](JobRecord& record) {
         record.progress = progress;
         if (!message.empty()) {
             record.message = message;
@@ -162,61 +161,61 @@ void JobService::updateProgress(JobId id, double progress, std::string message) 
     });
 }
 
-void JobService::appendOutput(JobId id, const std::string& output) {
-    update(id, [&](JobRecord& record) {
+void JobService::AppendOutput(JobId id, const std::string& output) {
+    Update(id, [&](JobRecord& record) {
         record.output += output;
     });
 }
 
-void JobService::setCancellable(JobId id, bool cancellable) {
-    update(id, [&](JobRecord& record) {
+void JobService::SetCancellable(JobId id, bool cancellable) {
+    Update(id, [&](JobRecord& record) {
         record.cancellable = cancellable;
     });
 }
 
-void JobService::setCancelHandler(JobId id, std::function<void()> handler) {
+void JobService::SetCancelHandler(JobId id, std::function<void()> handler) {
     {
         std::lock_guard<std::mutex> lock(mutex_);
-        auto jobIt = jobs_.find(id);
-        if (jobIt == jobs_.end() || terminal(jobIt->second.status)) {
+        auto job_it = jobs_.find(id);
+        if (job_it == jobs_.end() || IsTerminalStatus(job_it->second.status)) {
             return;
         }
         if (handler) {
-            cancelHandlers_[id] = std::move(handler);
+            cancel_handlers_[id] = std::move(handler);
         } else {
-            cancelHandlers_.erase(id);
+            cancel_handlers_.erase(id);
         }
     }
-    setCancellable(id, handler != nullptr);
+    SetCancellable(id, handler != nullptr);
 }
 
-void JobService::setData(JobId id, Json data) {
-    update(id, [&](JobRecord& record) {
-        record.data = std::move(data);
+void JobService::SetPayload(JobId id, Value payload) {
+    Update(id, [&](JobRecord& record) {
+        record.payload = std::move(payload);
     });
 }
 
-void JobService::complete(JobId id, bool success, std::string message) {
-    update(id, [&](JobRecord& record) {
+void JobService::Complete(JobId id, bool success, std::string message) {
+    Update(id, [&](JobRecord& record) {
         record.status = success ? JobStatus::Succeeded : JobStatus::Failed;
         record.progress = 1.0;
         record.message = std::move(message);
     });
     std::lock_guard<std::mutex> lock(mutex_);
-    cancelHandlers_.erase(id);
+    cancel_handlers_.erase(id);
 }
 
-void JobService::cancel(JobId id, std::string message) {
-    update(id, [&](JobRecord& record) {
+void JobService::Cancel(JobId id, std::string message) {
+    Update(id, [&](JobRecord& record) {
         record.status = JobStatus::Cancelled;
         record.progress = 1.0;
         record.message = std::move(message);
     });
     std::lock_guard<std::mutex> lock(mutex_);
-    cancelHandlers_.erase(id);
+    cancel_handlers_.erase(id);
 }
 
-bool JobService::requestCancel(JobId id) {
+bool JobService::RequestCancel(JobId id) {
     JobRecord snapshot;
     std::function<void()> handler;
     {
@@ -226,101 +225,64 @@ bool JobService::requestCancel(JobId id) {
             return false;
         }
         JobRecord& record = it->second;
-        if (!record.cancellable || terminal(record.status)) {
+        if (!record.cancellable || IsTerminalStatus(record.status)) {
             return false;
         }
-        record.cancellationRequested = true;
-        auto handlerIt = cancelHandlers_.find(id);
-        if (handlerIt != cancelHandlers_.end()) {
-            handler = handlerIt->second;
+        record.cancellation_requested = true;
+        auto handler_it = cancel_handlers_.find(id);
+        if (handler_it != cancel_handlers_.end()) {
+            handler = handler_it->second;
         }
         snapshot = record;
     }
     if (handler) {
         handler();
     }
-    publish(snapshot);
+    Publish(snapshot);
     return true;
 }
 
-bool JobService::cancellationRequested(JobId id) const {
-    auto found = job(id);
-    return found && found->cancellationRequested;
+bool JobService::CancellationRequested(JobId id) const {
+    auto found = Job(id);
+    return found && found->cancellation_requested;
 }
 
-bool JobService::isTerminal(JobId id) const {
-    auto found = job(id);
-    return !found || terminal(found->status);
+bool JobService::IsTerminal(JobId id) const {
+    auto found = Job(id);
+    return !found || IsTerminalStatus(found->status);
 }
 
-bool JobService::ready(JobId id) const {
-    auto found = job(id);
+bool JobService::Ready(JobId id) const {
+    auto found = Job(id);
     if (!found) {
         return false;
     }
     for (JobId dependency : found->dependencies) {
-        auto dependencyJob = job(dependency);
-        if (!dependencyJob || dependencyJob->status != JobStatus::Succeeded) {
+        auto dependency_job = Job(dependency);
+        if (!dependency_job || dependency_job->status != JobStatus::Succeeded) {
             return false;
         }
     }
     return true;
 }
 
-void JobService::applyExecutionEvent(const ExecutionEvent& event) {
-    if (event.jobId == 0) {
-        return;
-    }
-    switch (event.kind) {
-    case ExecutionEventKind::Started:
-        markRunning(event.jobId);
-        if (event.progress >= 0.0) {
-            updateProgress(event.jobId, event.progress);
-        }
-        return;
-    case ExecutionEventKind::Stdout:
-    case ExecutionEventKind::Stderr:
-        appendOutput(event.jobId, event.text);
-        return;
-    case ExecutionEventKind::Progress:
-        updateProgress(event.jobId, event.progress, event.text);
-        return;
-    case ExecutionEventKind::Finished:
-        if (!event.text.empty()) {
-            appendOutput(event.jobId, event.text);
-        }
-        if (cancellationRequested(event.jobId)) {
-            cancel(event.jobId, "Job cancelled");
-        } else {
-            complete(event.jobId, event.exitCode == 0);
-        }
-        return;
-    }
-}
-
-void JobService::applyExecutionEvents(const std::vector<ExecutionEvent>& events) {
-    for (const ExecutionEvent& event : events) {
-        applyExecutionEvent(event);
-    }
-}
-
-std::optional<JobRecord> JobService::job(JobId id) const {
+std::optional<JobRecord> JobService::Job(JobId id) const {
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = jobs_.find(id);
     return it == jobs_.end() ? std::nullopt : std::optional<JobRecord>(it->second);
 }
 
-std::optional<JobRecord> JobService::wait(JobId id) const {
+std::optional<JobRecord> JobService::Wait(JobId id) const {
     std::unique_lock<std::mutex> lock(mutex_);
     changed_.wait(lock, [this, id] {
         auto it = jobs_.find(id);
-        return it == jobs_.end() || terminal(it->second.status);
+        return it == jobs_.end() || IsTerminalStatus(it->second.status);
     });
     auto it = jobs_.find(id);
     return it == jobs_.end() ? std::nullopt : std::optional<JobRecord>(it->second);
 }
 
-std::vector<JobRecord> JobService::jobs() const {
+std::vector<JobRecord> JobService::Jobs() const {
     std::lock_guard<std::mutex> lock(mutex_);
     std::vector<JobRecord> result;
     for (const auto& [id, job] : jobs_) {
@@ -330,26 +292,26 @@ std::vector<JobRecord> JobService::jobs() const {
     return result;
 }
 
-void JobService::clear() {
+void JobService::Clear() {
     std::lock_guard<std::mutex> lock(mutex_);
     jobs_.clear();
-    cancelHandlers_.clear();
+    cancel_handlers_.clear();
     changed_.notify_all();
 }
 
-std::uint64_t JobService::onDidChangeJob(EventBus<JobChangeEvent>::Listener listener) {
-    return onDidChange_.subscribe(std::move(listener));
+std::uint64_t JobService::OnDidChangeJob(EventBus<JobChangeEvent>::Listener listener) {
+    return on_did_change_.Subscribe(std::move(listener));
 }
 
-void JobService::removeJobListener(std::uint64_t listenerId) {
-    onDidChange_.unsubscribe(listenerId);
+void JobService::RemoveJobListener(std::uint64_t listener_id) {
+    on_did_change_.Unsubscribe(listener_id);
 }
 
-void JobService::publish(const JobRecord& job) {
-    onDidChange_.publish({.job = job});
+void JobService::Publish(const JobRecord& job) {
+    on_did_change_.Publish({.job = job});
 }
 
-bool JobService::update(JobId id, const std::function<void(JobRecord&)>& update) {
+bool JobService::Update(JobId id, const std::function<void(JobRecord&)>& update) {
     JobRecord snapshot;
     {
         std::lock_guard<std::mutex> lock(mutex_);
@@ -361,11 +323,11 @@ bool JobService::update(JobId id, const std::function<void(JobRecord&)>& update)
         snapshot = it->second;
     }
     changed_.notify_all();
-    publish(snapshot);
+    Publish(snapshot);
     return true;
 }
 
-std::string toString(JobKind kind) {
+std::string ToString(JobKind kind) {
     switch (kind) {
     case JobKind::Generic:
         return "generic";
@@ -387,7 +349,7 @@ std::string toString(JobKind kind) {
     return "generic";
 }
 
-std::string toString(JobStatus status) {
+std::string ToString(JobStatus status) {
     switch (status) {
     case JobStatus::Pending:
         return "pending";
@@ -401,34 +363,6 @@ std::string toString(JobStatus status) {
         return "cancelled";
     }
     return "pending";
-}
-
-Json toJson(const JobRecord& job) {
-    Json::Array dependencies;
-    for (JobId dependency : job.dependencies) {
-        dependencies.push_back(Json(static_cast<std::int64_t>(dependency)));
-    }
-    return Json::object({
-        {"id", Json(static_cast<std::int64_t>(job.id))},
-        {"kind", Json(toString(job.kind))},
-        {"status", Json(toString(job.status))},
-        {"title", Json(job.title)},
-        {"message", Json(job.message)},
-        {"output", Json(job.output)},
-        {"progress", Json(job.progress)},
-        {"cancellable", Json(job.cancellable)},
-        {"cancellationRequested", Json(job.cancellationRequested)},
-        {"dependencies", Json::array(std::move(dependencies))},
-        {"data", job.data},
-    });
-}
-
-Json toJson(const std::vector<JobRecord>& jobs) {
-    Json::Array values;
-    for (const JobRecord& job : jobs) {
-        values.push_back(toJson(job));
-    }
-    return Json::array(std::move(values));
 }
 
 }

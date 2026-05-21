@@ -7,9 +7,9 @@
 #include <variant>
 #include <vector>
 
-#include "vanta/platform/async.h"
-#include "vanta/platform/json.h"
-#include "vanta/platform/result.h"
+#include "vanta/core/event.h"
+#include "vanta/core/result.h"
+#include "vanta/core/value.h"
 
 namespace vanta {
 
@@ -43,18 +43,18 @@ struct SettingValue {
     SettingValueType type = SettingValueType::String;
     SettingValueData data = std::string();
 
-    static SettingValue boolValue(bool value);
-    static SettingValue intValue(int value);
-    static SettingValue doubleValue(double value);
-    static SettingValue stringValue(std::string value);
-    static SettingValue stringListValue(std::vector<std::string> value);
-    static SettingValue pathValue(std::string value);
+    static SettingValue BoolValue(bool value);
+    static SettingValue IntValue(int value);
+    static SettingValue DoubleValue(double value);
+    static SettingValue StringValue(std::string value);
+    static SettingValue StringListValue(std::vector<std::string> value);
+    static SettingValue PathValue(std::string value);
 };
 
 struct SettingNode {
     std::string id;
-    std::string parentId;
-    std::string ownerId;
+    std::string parent_id;
+    std::string owner_id;
     std::string title;
     std::string description;
     int order = 0;
@@ -62,23 +62,23 @@ struct SettingNode {
 
 struct SettingDefinition {
     std::string id;
-    std::string ownerId;
-    std::string nodeId;
+    std::string owner_id;
+    std::string node_id;
     std::string title;
     std::string description;
     SettingValueType type = SettingValueType::String;
-    SettingValue defaultValue = SettingValue::stringValue("");
-    std::vector<SettingScopeKind> supportedScopes;
-    std::vector<SettingScopeKind> resolutionOrder;
+    SettingValue default_value = SettingValue::StringValue("");
+    std::vector<SettingScopeKind> supported_scopes;
+    std::vector<SettingScopeKind> resolution_order;
     std::vector<std::string> tags;
     std::vector<std::string> aliases;
     int order = 0;
 };
 
 struct SettingQuery {
-    std::string workspaceId;
-    std::string projectId;
-    std::string languageId;
+    std::string workspace_id;
+    std::string project_id;
+    std::string language_id;
 };
 
 struct SettingResolution {
@@ -92,38 +92,38 @@ struct SettingScopeDescriptor {
     std::string title;
     bool readable = true;
     bool writable = true;
-    bool hasValue = false;
-    bool effectiveSource = false;
+    bool has_value = false;
+    bool effective_source = false;
 };
 
 struct SettingSearchResult {
-    std::string settingId;
-    std::string nodeId;
+    std::string setting_id;
+    std::string node_id;
     std::vector<std::string> path;
     std::string title;
     std::string description;
     int score = 0;
-    std::vector<std::string> matchedFields;
+    std::vector<std::string> matched_fields;
 };
 
 struct SettingChangeEvent {
     std::string id;
     SettingScope scope;
-    std::optional<SettingValue> oldValue;
-    std::optional<SettingValue> newValue;
-    SettingResolution effectiveValue;
+    std::optional<SettingValue> old_value;
+    std::optional<SettingValue> new_value;
+    SettingResolution effective_value;
 };
 
 class SettingsStore {
 public:
-    std::optional<SettingValue> get(const std::string& id) const;
-    void set(std::string id, SettingValue value);
-    bool remove(const std::string& id);
-    const std::map<std::string, SettingValue>& values() const;
-    void clear();
+    std::optional<SettingValue> Get(const std::string& id) const;
+    void Set(std::string id, SettingValue value);
+    bool Remove(const std::string& id);
+    const std::map<std::string, SettingValue>& Values() const;
+    void Clear();
 
-    Result<void> load(const std::filesystem::path& path);
-    Result<void> save(const std::filesystem::path& path) const;
+    Result<void> Load(const std::filesystem::path& path);
+    Result<void> Save(const std::filesystem::path& path) const;
 
 private:
     std::map<std::string, SettingValue> values_;
@@ -131,62 +131,61 @@ private:
 
 class SettingsService {
 public:
-    void registerNode(SettingNode node);
-    void registerSetting(SettingDefinition definition);
+    void RegisterNode(SettingNode node);
+    void RegisterSetting(SettingDefinition definition);
 
-    SettingResolution resolve(const std::string& id, const SettingQuery& query = {}) const;
-    std::optional<SettingValue> valueAt(const std::string& id, SettingScope scope) const;
-    bool setValue(const std::string& id, SettingScope scope, SettingValue value, std::string* errorMessage = nullptr);
-    bool resetValue(const std::string& id, SettingScope scope);
+    SettingResolution Resolve(const std::string& id, const SettingQuery& query = {}) const;
+    std::optional<SettingValue> ValueAt(const std::string& id, SettingScope scope) const;
+    bool SetValue(const std::string& id, SettingScope scope, SettingValue value, std::string* error_message = nullptr);
+    bool ResetValue(const std::string& id, SettingScope scope);
 
-    std::vector<SettingNode> nodes() const;
-    std::vector<SettingNode> children(const std::string& parentId) const;
-    std::vector<SettingDefinition> settings(const std::string& nodeId) const;
-    std::optional<SettingDefinition> definition(const std::string& id) const;
+    std::vector<SettingNode> Nodes() const;
+    std::vector<SettingNode> Children(const std::string& parent_id) const;
+    std::vector<SettingDefinition> Settings(const std::string& node_id) const;
+    std::optional<SettingDefinition> Definition(const std::string& id) const;
 
-    std::vector<SettingScopeDescriptor> scopesFor(const std::string& id, const SettingQuery& query = {}) const;
-    std::vector<SettingSearchResult> search(const std::string& query, const SettingQuery& settingQuery = {}) const;
+    std::vector<SettingScopeDescriptor> ScopesFor(const std::string& id, const SettingQuery& query = {}) const;
+    std::vector<SettingSearchResult> Search(const std::string& query, const SettingQuery& setting_query = {}) const;
 
-    Result<void> load(SettingScope scope, const std::filesystem::path& path);
-    Result<void> save(SettingScope scope, const std::filesystem::path& path) const;
-    SettingsStore& store(SettingScope scope);
-    const SettingsStore* store(SettingScope scope) const;
+    Result<void> Load(SettingScope scope, const std::filesystem::path& path);
+    Result<void> Save(SettingScope scope, const std::filesystem::path& path) const;
+    SettingsStore& Store(SettingScope scope);
+    const SettingsStore* Store(SettingScope scope) const;
 
-    std::uint64_t onDidChangeSetting(EventBus<SettingChangeEvent>::Listener listener);
-    void removeSettingListener(std::uint64_t listenerId);
+    std::uint64_t OnDidChangeSetting(EventBus<SettingChangeEvent>::Listener listener);
+    void RemoveSettingListener(std::uint64_t listener_id);
 
 private:
-    std::vector<SettingScopeKind> resolutionOrder(const SettingDefinition& definition) const;
-    std::optional<SettingScope> scopeFor(SettingScopeKind kind, const SettingQuery& query) const;
-    std::vector<std::string> nodePath(const std::string& nodeId) const;
-    bool valueMatchesType(const SettingDefinition& definition, const SettingValue& value) const;
-    void publish(SettingChangeEvent event);
+    std::vector<SettingScopeKind> ResolutionOrder(const SettingDefinition& definition) const;
+    std::optional<SettingScope> ScopeFor(SettingScopeKind kind, const SettingQuery& query) const;
+    std::vector<std::string> NodePath(const std::string& node_id) const;
+    bool ValueMatchesType(const SettingDefinition& definition, const SettingValue& value) const;
+    void Publish(SettingChangeEvent event);
 
     std::map<std::string, SettingNode> nodes_;
     std::map<std::string, SettingDefinition> definitions_;
     std::map<SettingScope, SettingsStore> stores_;
-    EventBus<SettingChangeEvent> onDidChange_;
+    EventBus<SettingChangeEvent> on_did_change_;
 };
 
 class PluginStorageService {
 public:
     explicit PluginStorageService(std::filesystem::path root = {});
 
-    void setRoot(std::filesystem::path root);
-    Result<void> write(std::string pluginId, std::string key, Json value) const;
-    Result<Json> read(const std::string& pluginId, const std::string& key) const;
+    void SetRoot(std::filesystem::path root);
+    Result<void> Write(std::string plugin_id, std::string key, Value value) const;
+    Result<Value> Read(const std::string& plugin_id, const std::string& key) const;
 
 private:
-    std::filesystem::path pathFor(const std::string& pluginId, const std::string& key) const;
+    std::filesystem::path PathFor(const std::string& plugin_id, const std::string& key) const;
 
     std::filesystem::path root_;
 };
 
-void registerDefaultSettings(SettingsService& settings);
-std::string toString(SettingScopeKind kind);
-std::string toString(SettingValueType type);
-Json toJson(const SettingValue& value);
-std::optional<SettingValue> settingValueFromJson(const Json& json, SettingValueType type);
-std::string settingValueToString(const SettingValue& value);
+void RegisterDefaultSettings(SettingsService& settings);
+std::string ToString(SettingScopeKind kind);
+std::string ToString(SettingValueType type);
+std::optional<SettingValue> SettingValueFromValue(const Value& value, SettingValueType type);
+std::string SettingValueToString(const SettingValue& value);
 
 }

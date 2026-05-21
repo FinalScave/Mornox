@@ -2,26 +2,26 @@
 
 namespace vanta {
 
-void DiagnosticService::publish(std::string source, std::vector<Diagnostic> diagnostics) {
-    const std::string sourceId = source;
-    diagnosticsBySource_[std::move(source)] = diagnostics;
-    onDidChange_.publish({
-        .source = sourceId,
-        .diagnostics = diagnosticsBySource_.at(sourceId),
+void DiagnosticService::Publish(std::string source, std::vector<Diagnostic> diagnostics) {
+    const std::string source_id = source;
+    diagnostics_by_source_[std::move(source)] = diagnostics;
+    on_did_change_.Publish({
+        .source = source_id,
+        .diagnostics = diagnostics_by_source_.at(source_id),
     });
 }
 
-void DiagnosticService::clear(const std::string& source) {
-    diagnosticsBySource_.erase(source);
-    onDidChange_.publish({
+void DiagnosticService::Clear(const std::string& source) {
+    diagnostics_by_source_.erase(source);
+    on_did_change_.Publish({
         .source = source,
         .diagnostics = {},
     });
 }
 
-std::vector<Diagnostic> DiagnosticService::diagnosticsForFile(const VirtualFile& file) const {
+std::vector<Diagnostic> DiagnosticService::DiagnosticsForFile(const VirtualFile& file) const {
     std::vector<Diagnostic> result;
-    for (const auto& [source, diagnostics] : diagnosticsBySource_) {
+    for (const auto& [source, diagnostics] : diagnostics_by_source_) {
         (void)source;
         for (const Diagnostic& diagnostic : diagnostics) {
             if (diagnostic.location.file == file) {
@@ -32,21 +32,21 @@ std::vector<Diagnostic> DiagnosticService::diagnosticsForFile(const VirtualFile&
     return result;
 }
 
-std::vector<Diagnostic> DiagnosticService::allDiagnostics() const {
+std::vector<Diagnostic> DiagnosticService::AllDiagnostics() const {
     std::vector<Diagnostic> result;
-    for (const auto& [source, diagnostics] : diagnosticsBySource_) {
+    for (const auto& [source, diagnostics] : diagnostics_by_source_) {
         (void)source;
         result.insert(result.end(), diagnostics.begin(), diagnostics.end());
     }
     return result;
 }
 
-std::uint64_t DiagnosticService::onDidChangeDiagnostics(EventBus<DiagnosticChangeEvent>::Listener listener) {
-    return onDidChange_.subscribe(std::move(listener));
+std::uint64_t DiagnosticService::OnDidChangeDiagnostics(EventBus<DiagnosticChangeEvent>::Listener listener) {
+    return on_did_change_.Subscribe(std::move(listener));
 }
 
-void DiagnosticService::removeDiagnosticsListener(std::uint64_t listenerId) {
-    onDidChange_.unsubscribe(listenerId);
+void DiagnosticService::RemoveDiagnosticsListener(std::uint64_t listener_id) {
+    on_did_change_.Unsubscribe(listener_id);
 }
 
 }

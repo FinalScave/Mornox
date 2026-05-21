@@ -6,22 +6,25 @@
 #include <fstream>
 #include <sstream>
 #include <utility>
+#include <variant>
+
+#include "vanta/core/json_codec.h"
 
 namespace vanta {
 namespace {
 
-std::string lowercase(std::string value) {
+std::string Lowercase(std::string value) {
     for (char& character : value) {
         character = static_cast<char>(std::tolower(static_cast<unsigned char>(character)));
     }
     return value;
 }
 
-bool containsString(const std::vector<std::string>& values, const std::string& value) {
+bool ContainsString(const std::vector<std::string>& values, const std::string& value) {
     return std::find(values.begin(), values.end(), value) != values.end();
 }
 
-SettingValueType valueTypeFromString(const std::string& type) {
+SettingValueType ValueTypeFromString(const std::string& type) {
     if (type == "bool") {
         return SettingValueType::Bool;
     }
@@ -40,43 +43,65 @@ SettingValueType valueTypeFromString(const std::string& type) {
     return SettingValueType::String;
 }
 
-std::optional<SettingValue> settingValueFromTypedJson(const Json& json) {
-    if (json.isObject() && json.contains("type") && json["type"].isString() && json.contains("value")) {
-        return settingValueFromJson(json["value"], valueTypeFromString(json["type"].asString()));
+std::optional<SettingValue> SettingValueFromTypedJson(const Value& json) {
+    if (json.IsObject() && json.Contains("type") && json["type"].IsString() && json.Contains("value")) {
+        return SettingValueFromValue(json["value"], ValueTypeFromString(json["type"].AsString()));
     }
-    if (json.isBool()) {
-        return SettingValue::boolValue(json.asBool());
+    if (json.IsBool()) {
+        return SettingValue::BoolValue(json.AsBool());
     }
-    if (json.isInt()) {
-        return SettingValue::intValue(static_cast<int>(json.asInt()));
+    if (json.IsInt()) {
+        return SettingValue::IntValue(static_cast<int>(json.AsInt()));
     }
-    if (json.isDouble()) {
-        return SettingValue::doubleValue(json.asDouble());
+    if (json.IsDouble()) {
+        return SettingValue::DoubleValue(json.AsDouble());
     }
-    if (json.isString()) {
-        return SettingValue::stringValue(json.asString());
+    if (json.IsString()) {
+        return SettingValue::StringValue(json.AsString());
     }
-    if (json.isArray()) {
+    if (json.IsArray()) {
         std::vector<std::string> values;
-        for (const Json& item : json.asArray()) {
-            if (!item.isString()) {
+        for (const Value& item : json.AsArray()) {
+            if (!item.IsString()) {
                 return std::nullopt;
             }
-            values.push_back(item.asString());
+            values.push_back(item.AsString());
         }
-        return SettingValue::stringListValue(std::move(values));
+        return SettingValue::StringListValue(std::move(values));
     }
     return std::nullopt;
 }
 
-Json typedSettingValueToJson(const SettingValue& value) {
-    return Json::object({
-        {"type", Json(toString(value.type))},
-        {"value", toJson(value)},
+Value SettingValueProjection(const SettingValue& value) {
+    switch (value.type) {
+    case SettingValueType::Bool:
+        return Value(std::get<bool>(value.data));
+    case SettingValueType::Int:
+        return Value(static_cast<std::int64_t>(std::get<int>(value.data)));
+    case SettingValueType::Double:
+        return Value(std::get<double>(value.data));
+    case SettingValueType::String:
+    case SettingValueType::Path:
+        return Value(std::get<std::string>(value.data));
+    case SettingValueType::StringList: {
+        Value::Array values;
+        for (const std::string& item : std::get<std::vector<std::string>>(value.data)) {
+            values.push_back(Value(item));
+        }
+        return Value::ArrayValue(std::move(values));
+    }
+    }
+    return Value();
+}
+
+Value TypedSettingValueProjection(const SettingValue& value) {
+    return Value::ObjectValue({
+        {"type", Value(ToString(value.type))},
+        {"value", SettingValueProjection(value)},
     });
 }
 
-std::string scopeTitle(SettingScopeKind kind, const std::string& qualifier) {
+std::string ScopeTitle(SettingScopeKind kind, const std::string& qualifier) {
     switch (kind) {
     case SettingScopeKind::Ide:
         return "IDE";
@@ -90,11 +115,11 @@ std::string scopeTitle(SettingScopeKind kind, const std::string& qualifier) {
     return "";
 }
 
-int matchScore(const std::string& query, const std::string& field) {
+int MatchScore(const std::string& query, const std::string& field) {
     if (query.empty() || field.empty()) {
         return 0;
     }
-    const std::string value = lowercase(field);
+    const std::string value = Lowercase(field);
     if (value == query) {
         return 120;
     }
@@ -107,13 +132,13 @@ int matchScore(const std::string& query, const std::string& field) {
     return 0;
 }
 
-void addMatch(std::vector<std::string>& fields, const std::string& field) {
-    if (!containsString(fields, field)) {
+void AddMatch(std::vector<std::string>& fields, const std::string& field) {
+    if (!ContainsString(fields, field)) {
         fields.push_back(field);
     }
 }
 
-std::vector<SettingScopeKind> defaultResolutionOrder(const std::vector<SettingScopeKind>& supportedScopes) {
+std::vector<SettingScopeKind> DefaultResolutionOrder(const std::vector<SettingScopeKind>& supported_scopes) {
     const std::vector<SettingScopeKind> priority = {
         SettingScopeKind::Language,
         SettingScopeKind::Project,
@@ -122,30 +147,30 @@ std::vector<SettingScopeKind> defaultResolutionOrder(const std::vector<SettingSc
     };
     std::vector<SettingScopeKind> values;
     for (SettingScopeKind kind : priority) {
-        if (std::find(supportedScopes.begin(), supportedScopes.end(), kind) != supportedScopes.end()) {
+        if (std::find(supported_scopes.begin(), supported_scopes.end(), kind) != supported_scopes.end()) {
             values.push_back(kind);
         }
     }
     return values.empty() ? std::vector<SettingScopeKind>{SettingScopeKind::Ide} : values;
 }
 
-std::vector<SettingScopeKind> defaultSupportedScopes() {
+std::vector<SettingScopeKind> DefaultSupportedScopes() {
     return {SettingScopeKind::Ide};
 }
 
-SettingQuery queryFromScope(SettingScope scope) {
+SettingQuery QueryFromScope(SettingScope scope) {
     SettingQuery query;
     switch (scope.kind) {
     case SettingScopeKind::Ide:
         break;
     case SettingScopeKind::Workspace:
-        query.workspaceId = scope.qualifier;
+        query.workspace_id = scope.qualifier;
         break;
     case SettingScopeKind::Project:
-        query.projectId = scope.qualifier;
+        query.project_id = scope.qualifier;
         break;
     case SettingScopeKind::Language:
-        query.languageId = scope.qualifier;
+        query.language_id = scope.qualifier;
         break;
     }
     return query;
@@ -164,135 +189,139 @@ bool SettingScope::operator==(const SettingScope& other) const noexcept {
     return kind == other.kind && qualifier == other.qualifier;
 }
 
-SettingValue SettingValue::boolValue(bool value) {
+SettingValue SettingValue::BoolValue(bool value) {
     return {.type = SettingValueType::Bool, .data = value};
 }
 
-SettingValue SettingValue::intValue(int value) {
+SettingValue SettingValue::IntValue(int value) {
     return {.type = SettingValueType::Int, .data = value};
 }
 
-SettingValue SettingValue::doubleValue(double value) {
+SettingValue SettingValue::DoubleValue(double value) {
     return {.type = SettingValueType::Double, .data = value};
 }
 
-SettingValue SettingValue::stringValue(std::string value) {
+SettingValue SettingValue::StringValue(std::string value) {
     return {.type = SettingValueType::String, .data = std::move(value)};
 }
 
-SettingValue SettingValue::stringListValue(std::vector<std::string> value) {
+SettingValue SettingValue::StringListValue(std::vector<std::string> value) {
     return {.type = SettingValueType::StringList, .data = std::move(value)};
 }
 
-SettingValue SettingValue::pathValue(std::string value) {
+SettingValue SettingValue::PathValue(std::string value) {
     return {.type = SettingValueType::Path, .data = std::move(value)};
 }
 
-std::optional<SettingValue> SettingsStore::get(const std::string& id) const {
+std::optional<SettingValue> SettingsStore::Get(const std::string& id) const {
     auto it = values_.find(id);
     return it == values_.end() ? std::nullopt : std::optional<SettingValue>(it->second);
 }
 
-void SettingsStore::set(std::string id, SettingValue value) {
+void SettingsStore::Set(std::string id, SettingValue value) {
     values_[std::move(id)] = std::move(value);
 }
 
-bool SettingsStore::remove(const std::string& id) {
+bool SettingsStore::Remove(const std::string& id) {
     return values_.erase(id) > 0;
 }
 
-const std::map<std::string, SettingValue>& SettingsStore::values() const {
+const std::map<std::string, SettingValue>& SettingsStore::Values() const {
     return values_;
 }
 
-void SettingsStore::clear() {
+void SettingsStore::Clear() {
     values_.clear();
 }
 
-Result<void> SettingsStore::load(const std::filesystem::path& path) {
+Result<void> SettingsStore::Load(const std::filesystem::path& path) {
     values_.clear();
     if (!std::filesystem::exists(path)) {
-        return Result<void>::success();
+        return Result<void>::Success();
     }
 
     std::ifstream input(path);
     if (!input) {
-        return Result<void>::failure("settings.read", "Failed to read settings file");
+        return Result<void>::Failure("settings.read", "Failed to read settings file");
     }
 
     std::ostringstream stream;
     stream << input.rdbuf();
-    Json root = Json::parse(stream.str());
-    if (!root.isObject()) {
-        return Result<void>::failure("settings.format", "Settings root must be an object");
+    Result<Value> parsed = ValueFromJsonText(stream.str());
+    if (!parsed) {
+        return Result<void>::Failure("settings.parse", parsed.ErrorValue().message);
+    }
+    const Value& root = parsed.Value();
+    if (!root.IsObject()) {
+        return Result<void>::Failure("settings.format", "Settings root must be an object");
     }
 
-    for (const auto& [key, value] : root.asObject()) {
-        if (auto parsed = settingValueFromTypedJson(value)) {
+    for (const auto& [key, value] : root.AsObject()) {
+        if (auto parsed = SettingValueFromTypedJson(value)) {
             values_[key] = std::move(*parsed);
         }
     }
-    return Result<void>::success();
+    return Result<void>::Success();
 }
 
-Result<void> SettingsStore::save(const std::filesystem::path& path) const {
+Result<void> SettingsStore::Save(const std::filesystem::path& path) const {
     std::error_code error;
     std::filesystem::create_directories(path.parent_path(), error);
     if (error) {
-        return Result<void>::failure("settings.directory", "Failed to create settings directory");
+        return Result<void>::Failure("settings.directory", "Failed to create settings directory");
     }
 
-    Json::Object values;
+    Value::Object values;
     for (const auto& [key, value] : values_) {
-        values[key] = typedSettingValueToJson(value);
+        values[key] = TypedSettingValueProjection(value);
     }
 
     std::ofstream output(path);
     if (!output) {
-        return Result<void>::failure("settings.write", "Failed to write settings file");
+        return Result<void>::Failure("settings.write", "Failed to write settings file");
     }
-    output << Json::object(std::move(values)).dump();
-    return Result<void>::success();
+    output << ValueToJsonText(Value::ObjectValue(std::move(values)));
+    return Result<void>::Success();
 }
 
-void SettingsService::registerNode(SettingNode node) {
+void SettingsService::RegisterNode(SettingNode node) {
     if (node.id.empty()) {
         return;
     }
     nodes_[node.id] = std::move(node);
 }
 
-void SettingsService::registerSetting(SettingDefinition definition) {
+void SettingsService::RegisterSetting(SettingDefinition definition) {
     if (definition.id.empty()) {
         return;
     }
-    if (definition.supportedScopes.empty()) {
-        definition.supportedScopes = defaultSupportedScopes();
+    if (definition.supported_scopes.empty()) {
+        definition.supported_scopes = DefaultSupportedScopes();
     }
-    if (definition.resolutionOrder.empty()) {
-        definition.resolutionOrder = defaultResolutionOrder(definition.supportedScopes);
+    if (definition.resolution_order.empty()) {
+        definition.resolution_order = DefaultResolutionOrder(definition.supported_scopes);
     }
     definitions_[definition.id] = std::move(definition);
 }
 
-SettingResolution SettingsService::resolve(const std::string& id, const SettingQuery& query) const {
-    auto definitionValue = definition(id);
-    if (!definitionValue) {
+SettingResolution SettingsService::Resolve(const std::string& id, const SettingQuery& query) const {
+    auto definition_value = Definition(id);
+    if (!definition_value) {
         return {
-            .value = SettingValue::stringValue(""),
+            .value = SettingValue::StringValue(""),
             .source = {},
             .defaulted = true,
         };
     }
 
-    const SettingDefinition& setting = *definitionValue;
-    for (SettingScopeKind kind : resolutionOrder(setting)) {
-        auto scope = scopeFor(kind, query);
+    const SettingDefinition& setting = *definition_value;
+    for (SettingScopeKind kind : ResolutionOrder(setting)) {
+        auto scope = ScopeFor(kind, query);
         if (!scope) {
             continue;
         }
-        if (const SettingsStore* found = store(*scope)) {
-            if (auto value = found->get(id)) {
+        if (const SettingsStore* found = Store(*scope)) {
+            if (auto value = found->Get(id)) {
                 return {
                     .value = *value,
                     .source = *scope,
@@ -302,69 +331,69 @@ SettingResolution SettingsService::resolve(const std::string& id, const SettingQ
         }
     }
     return {
-        .value = setting.defaultValue,
+        .value = setting.default_value,
         .source = {},
         .defaulted = true,
     };
 }
 
-std::optional<SettingValue> SettingsService::valueAt(const std::string& id, SettingScope scope) const {
-    const SettingsStore* found = store(std::move(scope));
-    return found == nullptr ? std::nullopt : found->get(id);
+std::optional<SettingValue> SettingsService::ValueAt(const std::string& id, SettingScope scope) const {
+    const SettingsStore* found = Store(std::move(scope));
+    return found == nullptr ? std::nullopt : found->Get(id);
 }
 
-bool SettingsService::setValue(const std::string& id, SettingScope scope, SettingValue value, std::string* errorMessage) {
-    auto definitionValue = definition(id);
-    if (!definitionValue) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Setting is not registered";
+bool SettingsService::SetValue(const std::string& id, SettingScope scope, SettingValue value, std::string* error_message) {
+    auto definition_value = Definition(id);
+    if (!definition_value) {
+        if (error_message != nullptr) {
+            *error_message = "Setting is not registered";
         }
         return false;
     }
-    const SettingDefinition& setting = *definitionValue;
-    if (std::find(setting.supportedScopes.begin(), setting.supportedScopes.end(), scope.kind) == setting.supportedScopes.end()) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Setting does not support this scope";
+    const SettingDefinition& setting = *definition_value;
+    if (std::find(setting.supported_scopes.begin(), setting.supported_scopes.end(), scope.kind) == setting.supported_scopes.end()) {
+        if (error_message != nullptr) {
+            *error_message = "Setting does not support this scope";
         }
         return false;
     }
-    if (!valueMatchesType(setting, value)) {
-        if (errorMessage != nullptr) {
-            *errorMessage = "Setting value type does not match definition";
+    if (!ValueMatchesType(setting, value)) {
+        if (error_message != nullptr) {
+            *error_message = "Setting value type does not match definition";
         }
         return false;
     }
 
-    SettingsStore& target = store(scope);
-    std::optional<SettingValue> oldValue = target.get(id);
-    target.set(id, std::move(value));
-    publish({
+    SettingsStore& target = Store(scope);
+    std::optional<SettingValue> old_value = target.Get(id);
+    target.Set(id, std::move(value));
+    Publish({
         .id = id,
         .scope = scope,
-        .oldValue = std::move(oldValue),
-        .newValue = target.get(id),
-        .effectiveValue = resolve(id, queryFromScope(scope)),
+        .old_value = std::move(old_value),
+        .new_value = target.Get(id),
+        .effective_value = Resolve(id, QueryFromScope(scope)),
     });
     return true;
 }
 
-bool SettingsService::resetValue(const std::string& id, SettingScope scope) {
-    SettingsStore& target = store(scope);
-    std::optional<SettingValue> oldValue = target.get(id);
-    if (!target.remove(id)) {
+bool SettingsService::ResetValue(const std::string& id, SettingScope scope) {
+    SettingsStore& target = Store(scope);
+    std::optional<SettingValue> old_value = target.Get(id);
+    if (!target.Remove(id)) {
         return false;
     }
-    publish({
+    Publish({
         .id = id,
         .scope = scope,
-        .oldValue = std::move(oldValue),
-        .newValue = std::nullopt,
-        .effectiveValue = resolve(id, queryFromScope(scope)),
+        .old_value = std::move(old_value),
+        .new_value = std::nullopt,
+        .effective_value = Resolve(id, QueryFromScope(scope)),
     });
     return true;
 }
 
-std::vector<SettingNode> SettingsService::nodes() const {
+std::vector<SettingNode> SettingsService::Nodes() const {
     std::vector<SettingNode> values;
     for (const auto& [id, node] : nodes_) {
         (void)id;
@@ -379,11 +408,11 @@ std::vector<SettingNode> SettingsService::nodes() const {
     return values;
 }
 
-std::vector<SettingNode> SettingsService::children(const std::string& parentId) const {
+std::vector<SettingNode> SettingsService::Children(const std::string& parent_id) const {
     std::vector<SettingNode> values;
     for (const auto& [id, node] : nodes_) {
         (void)id;
-        if (node.parentId == parentId) {
+        if (node.parent_id == parent_id) {
             values.push_back(node);
         }
     }
@@ -396,11 +425,11 @@ std::vector<SettingNode> SettingsService::children(const std::string& parentId) 
     return values;
 }
 
-std::vector<SettingDefinition> SettingsService::settings(const std::string& nodeId) const {
+std::vector<SettingDefinition> SettingsService::Settings(const std::string& node_id) const {
     std::vector<SettingDefinition> values;
     for (const auto& [id, definition] : definitions_) {
         (void)id;
-        if (definition.nodeId == nodeId) {
+        if (definition.node_id == node_id) {
             values.push_back(definition);
         }
     }
@@ -413,59 +442,59 @@ std::vector<SettingDefinition> SettingsService::settings(const std::string& node
     return values;
 }
 
-std::optional<SettingDefinition> SettingsService::definition(const std::string& id) const {
+std::optional<SettingDefinition> SettingsService::Definition(const std::string& id) const {
     auto it = definitions_.find(id);
     return it == definitions_.end() ? std::nullopt : std::optional<SettingDefinition>(it->second);
 }
 
-std::vector<SettingScopeDescriptor> SettingsService::scopesFor(const std::string& id, const SettingQuery& query) const {
-    auto definitionValue = definition(id);
-    if (!definitionValue) {
+std::vector<SettingScopeDescriptor> SettingsService::ScopesFor(const std::string& id, const SettingQuery& query) const {
+    auto definition_value = Definition(id);
+    if (!definition_value) {
         return {};
     }
-    const SettingResolution current = resolve(id, query);
+    const SettingResolution current = Resolve(id, query);
     std::vector<SettingScopeDescriptor> values;
-    for (SettingScopeKind kind : definitionValue->supportedScopes) {
-        auto scope = scopeFor(kind, query).value_or(SettingScope{.kind = kind});
+    for (SettingScopeKind kind : definition_value->supported_scopes) {
+        auto scope = ScopeFor(kind, query).value_or(SettingScope{.kind = kind});
         values.push_back({
             .scope = scope,
-            .title = scopeTitle(kind, scope.qualifier),
+            .title = ScopeTitle(kind, scope.qualifier),
             .readable = true,
             .writable = true,
-            .hasValue = valueAt(id, scope).has_value(),
-            .effectiveSource = !current.defaulted && current.source == scope,
+            .has_value = ValueAt(id, scope).has_value(),
+            .effective_source = !current.defaulted && current.source == scope,
         });
     }
     return values;
 }
 
-std::vector<SettingSearchResult> SettingsService::search(const std::string& query, const SettingQuery&) const {
-    const std::string needle = lowercase(query);
+std::vector<SettingSearchResult> SettingsService::Search(const std::string& query, const SettingQuery&) const {
+    const std::string needle = Lowercase(query);
     std::vector<SettingSearchResult> results;
     for (const auto& [id, definition] : definitions_) {
         int score = 0;
-        std::vector<std::string> matchedFields;
-        auto scoreField = [&](const std::string& name, const std::string& field, int weight = 1) {
-            const int fieldScore = matchScore(needle, field);
-            if (fieldScore > 0) {
-                score += fieldScore * weight;
-                addMatch(matchedFields, name);
+        std::vector<std::string> matched_fields;
+        auto score_field = [&](const std::string& name, const std::string& field, int weight = 1) {
+            const int field_score = MatchScore(needle, field);
+            if (field_score > 0) {
+                score += field_score * weight;
+                AddMatch(matched_fields, name);
             }
         };
 
-        scoreField("id", definition.id, 2);
-        scoreField("title", definition.title, 3);
-        scoreField("description", definition.description);
-        scoreField("owner", definition.ownerId);
+        score_field("id", definition.id, 2);
+        score_field("title", definition.title, 3);
+        score_field("description", definition.description);
+        score_field("owner", definition.owner_id);
         for (const std::string& tag : definition.tags) {
-            scoreField("tag", tag, 2);
+            score_field("tag", tag, 2);
         }
         for (const std::string& alias : definition.aliases) {
-            scoreField("alias", alias, 2);
+            score_field("alias", alias, 2);
         }
-        const std::vector<std::string> path = nodePath(definition.nodeId);
-        for (const std::string& pathItem : path) {
-            scoreField("path", pathItem, 2);
+        const std::vector<std::string> path = NodePath(definition.node_id);
+        for (const std::string& path_item : path) {
+            score_field("path", path_item, 2);
         }
 
         if (needle.empty()) {
@@ -475,207 +504,192 @@ std::vector<SettingSearchResult> SettingsService::search(const std::string& quer
             continue;
         }
         results.push_back({
-            .settingId = id,
-            .nodeId = definition.nodeId,
+            .setting_id = id,
+            .node_id = definition.node_id,
             .path = path,
             .title = definition.title,
             .description = definition.description,
             .score = score,
-            .matchedFields = std::move(matchedFields),
+            .matched_fields = std::move(matched_fields),
         });
     }
     std::sort(results.begin(), results.end(), [](const SettingSearchResult& left, const SettingSearchResult& right) {
         if (left.score != right.score) {
             return left.score > right.score;
         }
-        return left.settingId < right.settingId;
+        return left.setting_id < right.setting_id;
     });
     return results;
 }
 
-Result<void> SettingsService::load(SettingScope scope, const std::filesystem::path& path) {
-    return store(scope).load(path);
+Result<void> SettingsService::Load(SettingScope scope, const std::filesystem::path& path) {
+    return Store(scope).Load(path);
 }
 
-Result<void> SettingsService::save(SettingScope scope, const std::filesystem::path& path) const {
-    const SettingsStore* found = store(scope);
+Result<void> SettingsService::Save(SettingScope scope, const std::filesystem::path& path) const {
+    const SettingsStore* found = Store(scope);
     if (found == nullptr) {
-        return Result<void>::success();
+        return Result<void>::Success();
     }
-    return found->save(path);
+    return found->Save(path);
 }
 
-SettingsStore& SettingsService::store(SettingScope scope) {
+SettingsStore& SettingsService::Store(SettingScope scope) {
     return stores_[std::move(scope)];
 }
 
-const SettingsStore* SettingsService::store(SettingScope scope) const {
+const SettingsStore* SettingsService::Store(SettingScope scope) const {
     auto it = stores_.find(scope);
     return it == stores_.end() ? nullptr : &it->second;
 }
 
-std::uint64_t SettingsService::onDidChangeSetting(EventBus<SettingChangeEvent>::Listener listener) {
-    return onDidChange_.subscribe(std::move(listener));
+std::uint64_t SettingsService::OnDidChangeSetting(EventBus<SettingChangeEvent>::Listener listener) {
+    return on_did_change_.Subscribe(std::move(listener));
 }
 
-void SettingsService::removeSettingListener(std::uint64_t listenerId) {
-    onDidChange_.unsubscribe(listenerId);
+void SettingsService::RemoveSettingListener(std::uint64_t listener_id) {
+    on_did_change_.Unsubscribe(listener_id);
 }
 
-std::vector<SettingScopeKind> SettingsService::resolutionOrder(const SettingDefinition& definition) const {
-    return definition.resolutionOrder.empty() ? defaultResolutionOrder(definition.supportedScopes) : definition.resolutionOrder;
+std::vector<SettingScopeKind> SettingsService::ResolutionOrder(const SettingDefinition& definition) const {
+    return definition.resolution_order.empty() ? DefaultResolutionOrder(definition.supported_scopes) : definition.resolution_order;
 }
 
-std::optional<SettingScope> SettingsService::scopeFor(SettingScopeKind kind, const SettingQuery& query) const {
+std::optional<SettingScope> SettingsService::ScopeFor(SettingScopeKind kind, const SettingQuery& query) const {
     switch (kind) {
     case SettingScopeKind::Ide:
         return SettingScope{.kind = SettingScopeKind::Ide};
     case SettingScopeKind::Workspace:
-        return SettingScope{.kind = SettingScopeKind::Workspace, .qualifier = query.workspaceId};
+        return SettingScope{.kind = SettingScopeKind::Workspace, .qualifier = query.workspace_id};
     case SettingScopeKind::Project:
-        if (query.projectId.empty()) {
+        if (query.project_id.empty()) {
             return std::nullopt;
         }
-        return SettingScope{.kind = SettingScopeKind::Project, .qualifier = query.projectId};
+        return SettingScope{.kind = SettingScopeKind::Project, .qualifier = query.project_id};
     case SettingScopeKind::Language:
-        if (query.languageId.empty()) {
+        if (query.language_id.empty()) {
             return std::nullopt;
         }
-        return SettingScope{.kind = SettingScopeKind::Language, .qualifier = query.languageId};
+        return SettingScope{.kind = SettingScopeKind::Language, .qualifier = query.language_id};
     }
     return std::nullopt;
 }
 
-std::vector<std::string> SettingsService::nodePath(const std::string& nodeId) const {
+std::vector<std::string> SettingsService::NodePath(const std::string& node_id) const {
     std::vector<std::string> reversed;
-    std::string current = nodeId;
+    std::string current = node_id;
     while (!current.empty()) {
         auto it = nodes_.find(current);
         if (it == nodes_.end()) {
             break;
         }
         reversed.push_back(it->second.title);
-        current = it->second.parentId;
+        current = it->second.parent_id;
     }
     std::reverse(reversed.begin(), reversed.end());
     return reversed;
 }
 
-bool SettingsService::valueMatchesType(const SettingDefinition& definition, const SettingValue& value) const {
+bool SettingsService::ValueMatchesType(const SettingDefinition& definition, const SettingValue& value) const {
     return definition.type == value.type;
 }
 
-void SettingsService::publish(SettingChangeEvent event) {
-    onDidChange_.publish(std::move(event));
+void SettingsService::Publish(SettingChangeEvent event) {
+    on_did_change_.Publish(std::move(event));
 }
 
-void registerDefaultSettings(SettingsService& settings) {
-    settings.registerNode({.id = "editor", .ownerId = "vanta.core", .title = "Editor", .order = 10});
-    settings.registerNode({.id = "editor.behavior", .parentId = "editor", .ownerId = "vanta.core", .title = "Behavior", .order = 10});
-    settings.registerNode({.id = "editor.font", .parentId = "editor", .ownerId = "vanta.core", .title = "Font", .order = 20});
-    settings.registerNode({.id = "ai", .ownerId = "vanta.core", .title = "AI", .order = 20});
-    settings.registerNode({.id = "ai.agent", .parentId = "ai", .ownerId = "vanta.core", .title = "Agent", .order = 10});
-    settings.registerNode({.id = "ai.inlineCompletion", .parentId = "ai", .ownerId = "vanta.core", .title = "Inline Completion", .order = 20});
-    settings.registerNode({.id = "build", .ownerId = "vanta.core", .title = "Build", .order = 30});
-    settings.registerNode({.id = "build.cmake", .parentId = "build", .ownerId = "vanta.cmake", .title = "CMake", .order = 10});
-    settings.registerNode({.id = "execution", .ownerId = "vanta.core", .title = "Execution", .order = 40});
-    settings.registerNode({.id = "index", .ownerId = "vanta.core", .title = "Indexing", .order = 50});
+void RegisterDefaultSettings(SettingsService& settings) {
+    settings.RegisterNode({.id = "editor", .owner_id = "vanta.core", .title = "Editor", .order = 10});
+    settings.RegisterNode({.id = "editor.behavior", .parent_id = "editor", .owner_id = "vanta.core", .title = "Behavior", .order = 10});
+    settings.RegisterNode({.id = "editor.font", .parent_id = "editor", .owner_id = "vanta.core", .title = "Font", .order = 20});
+    settings.RegisterNode({.id = "ai", .owner_id = "vanta.core", .title = "AI", .order = 20});
+    settings.RegisterNode({.id = "ai.agent", .parent_id = "ai", .owner_id = "vanta.core", .title = "Agent", .order = 10});
+    settings.RegisterNode({.id = "ai.inlineCompletion", .parent_id = "ai", .owner_id = "vanta.core", .title = "Inline Completion", .order = 20});
+    settings.RegisterNode({.id = "build", .owner_id = "vanta.core", .title = "Build", .order = 30});
+    settings.RegisterNode({.id = "execution", .owner_id = "vanta.core", .title = "Execution", .order = 40});
+    settings.RegisterNode({.id = "index", .owner_id = "vanta.core", .title = "Indexing", .order = 50});
 
-    settings.registerSetting({
+    settings.RegisterSetting({
         .id = "editor.fontSize",
-        .ownerId = "vanta.core",
-        .nodeId = "editor.font",
+        .owner_id = "vanta.core",
+        .node_id = "editor.font",
         .title = "Font Size",
         .description = "Default editor font size.",
         .type = SettingValueType::Int,
-        .defaultValue = SettingValue::intValue(14),
-        .supportedScopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace},
-        .resolutionOrder = {SettingScopeKind::Workspace, SettingScopeKind::Ide},
+        .default_value = SettingValue::IntValue(14),
+        .supported_scopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace},
+        .resolution_order = {SettingScopeKind::Workspace, SettingScopeKind::Ide},
         .tags = {"font", "editor"},
         .order = 10,
     });
-    settings.registerSetting({
+    settings.RegisterSetting({
         .id = "editor.formatOnSave",
-        .ownerId = "vanta.core",
-        .nodeId = "editor.behavior",
+        .owner_id = "vanta.core",
+        .node_id = "editor.behavior",
         .title = "Format On Save",
         .description = "Format documents when they are saved.",
         .type = SettingValueType::Bool,
-        .defaultValue = SettingValue::boolValue(false),
-        .supportedScopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace, SettingScopeKind::Language},
-        .resolutionOrder = {SettingScopeKind::Language, SettingScopeKind::Workspace, SettingScopeKind::Ide},
+        .default_value = SettingValue::BoolValue(false),
+        .supported_scopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace, SettingScopeKind::Language},
+        .resolution_order = {SettingScopeKind::Language, SettingScopeKind::Workspace, SettingScopeKind::Ide},
         .tags = {"format", "save", "language"},
         .order = 10,
     });
-    settings.registerSetting({
+    settings.RegisterSetting({
         .id = "ai.agent.model",
-        .ownerId = "vanta.core",
-        .nodeId = "ai.agent",
+        .owner_id = "vanta.core",
+        .node_id = "ai.agent",
         .title = "Agent Model",
         .description = "Model used for agent coding tasks.",
         .type = SettingValueType::String,
-        .defaultValue = SettingValue::stringValue("default"),
-        .supportedScopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace, SettingScopeKind::Project},
-        .resolutionOrder = {SettingScopeKind::Project, SettingScopeKind::Workspace, SettingScopeKind::Ide},
+        .default_value = SettingValue::StringValue("default"),
+        .supported_scopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace, SettingScopeKind::Project},
+        .resolution_order = {SettingScopeKind::Project, SettingScopeKind::Workspace, SettingScopeKind::Ide},
         .tags = {"ai", "agent", "model"},
         .order = 10,
     });
-    settings.registerSetting({
+    settings.RegisterSetting({
         .id = "ai.inlineCompletion.enabled",
-        .ownerId = "vanta.core",
-        .nodeId = "ai.inlineCompletion",
+        .owner_id = "vanta.core",
+        .node_id = "ai.inlineCompletion",
         .title = "Inline Completion",
         .description = "Enable inline completion suggestions.",
         .type = SettingValueType::Bool,
-        .defaultValue = SettingValue::boolValue(true),
-        .supportedScopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace, SettingScopeKind::Language},
-        .resolutionOrder = {SettingScopeKind::Language, SettingScopeKind::Workspace, SettingScopeKind::Ide},
+        .default_value = SettingValue::BoolValue(true),
+        .supported_scopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace, SettingScopeKind::Language},
+        .resolution_order = {SettingScopeKind::Language, SettingScopeKind::Workspace, SettingScopeKind::Ide},
         .tags = {"ai", "completion", "inline"},
         .order = 10,
     });
-    settings.registerSetting({
-        .id = "cmake.buildDirectory",
-        .ownerId = "vanta.cmake",
-        .nodeId = "build.cmake",
-        .title = "Build Directory",
-        .description = "Default CMake build directory.",
-        .type = SettingValueType::Path,
-        .defaultValue = SettingValue::pathValue("build"),
-        .supportedScopes = {SettingScopeKind::Workspace, SettingScopeKind::Project},
-        .resolutionOrder = {SettingScopeKind::Project, SettingScopeKind::Workspace},
-        .tags = {"cmake", "build", "directory"},
-        .aliases = {"cmake build dir"},
-        .order = 10,
-    });
-    settings.registerSetting({
+    settings.RegisterSetting({
         .id = "execution.defaultTarget",
-        .ownerId = "vanta.core",
-        .nodeId = "execution",
+        .owner_id = "vanta.core",
+        .node_id = "execution",
         .title = "Default Target",
         .description = "Default execution target id.",
         .type = SettingValueType::String,
-        .defaultValue = SettingValue::stringValue("local.default"),
-        .supportedScopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace, SettingScopeKind::Project},
-        .resolutionOrder = {SettingScopeKind::Project, SettingScopeKind::Workspace, SettingScopeKind::Ide},
+        .default_value = SettingValue::StringValue("local.default"),
+        .supported_scopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace, SettingScopeKind::Project},
+        .resolution_order = {SettingScopeKind::Project, SettingScopeKind::Workspace, SettingScopeKind::Ide},
         .tags = {"run", "execution", "target"},
         .order = 10,
     });
-    settings.registerSetting({
+    settings.RegisterSetting({
         .id = "index.autoRefresh",
-        .ownerId = "vanta.core",
-        .nodeId = "index",
+        .owner_id = "vanta.core",
+        .node_id = "index",
         .title = "Auto Refresh Index",
         .description = "Refresh indexes when workspace files change.",
         .type = SettingValueType::Bool,
-        .defaultValue = SettingValue::boolValue(true),
-        .supportedScopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace},
-        .resolutionOrder = {SettingScopeKind::Workspace, SettingScopeKind::Ide},
+        .default_value = SettingValue::BoolValue(true),
+        .supported_scopes = {SettingScopeKind::Ide, SettingScopeKind::Workspace},
+        .resolution_order = {SettingScopeKind::Workspace, SettingScopeKind::Ide},
         .tags = {"index", "refresh"},
         .order = 10,
     });
 }
 
-std::string toString(SettingScopeKind kind) {
+std::string ToString(SettingScopeKind kind) {
     switch (kind) {
     case SettingScopeKind::Ide:
         return "ide";
@@ -689,7 +703,7 @@ std::string toString(SettingScopeKind kind) {
     return "ide";
 }
 
-std::string toString(SettingValueType type) {
+std::string ToString(SettingValueType type) {
     switch (type) {
     case SettingValueType::Bool:
         return "bool";
@@ -707,58 +721,36 @@ std::string toString(SettingValueType type) {
     return "string";
 }
 
-Json toJson(const SettingValue& value) {
-    switch (value.type) {
-    case SettingValueType::Bool:
-        return Json(std::get<bool>(value.data));
-    case SettingValueType::Int:
-        return Json(static_cast<std::int64_t>(std::get<int>(value.data)));
-    case SettingValueType::Double:
-        return Json(std::get<double>(value.data));
-    case SettingValueType::String:
-    case SettingValueType::Path:
-        return Json(std::get<std::string>(value.data));
-    case SettingValueType::StringList: {
-        Json::Array values;
-        for (const std::string& item : std::get<std::vector<std::string>>(value.data)) {
-            values.push_back(Json(item));
-        }
-        return Json::array(std::move(values));
-    }
-    }
-    return Json();
-}
-
-std::optional<SettingValue> settingValueFromJson(const Json& json, SettingValueType type) {
+std::optional<SettingValue> SettingValueFromValue(const Value& json, SettingValueType type) {
     switch (type) {
     case SettingValueType::Bool:
-        return json.isBool() ? std::optional<SettingValue>(SettingValue::boolValue(json.asBool())) : std::nullopt;
+        return json.IsBool() ? std::optional<SettingValue>(SettingValue::BoolValue(json.AsBool())) : std::nullopt;
     case SettingValueType::Int:
-        return json.isInt() ? std::optional<SettingValue>(SettingValue::intValue(static_cast<int>(json.asInt()))) : std::nullopt;
+        return json.IsInt() ? std::optional<SettingValue>(SettingValue::IntValue(static_cast<int>(json.AsInt()))) : std::nullopt;
     case SettingValueType::Double:
-        return json.isNumber() ? std::optional<SettingValue>(SettingValue::doubleValue(json.isDouble() ? json.asDouble() : static_cast<double>(json.asInt()))) : std::nullopt;
+        return json.IsNumber() ? std::optional<SettingValue>(SettingValue::DoubleValue(json.IsDouble() ? json.AsDouble() : static_cast<double>(json.AsInt()))) : std::nullopt;
     case SettingValueType::String:
-        return json.isString() ? std::optional<SettingValue>(SettingValue::stringValue(json.asString())) : std::nullopt;
+        return json.IsString() ? std::optional<SettingValue>(SettingValue::StringValue(json.AsString())) : std::nullopt;
     case SettingValueType::Path:
-        return json.isString() ? std::optional<SettingValue>(SettingValue::pathValue(json.asString())) : std::nullopt;
+        return json.IsString() ? std::optional<SettingValue>(SettingValue::PathValue(json.AsString())) : std::nullopt;
     case SettingValueType::StringList: {
-        if (!json.isArray()) {
+        if (!json.IsArray()) {
             return std::nullopt;
         }
         std::vector<std::string> values;
-        for (const Json& item : json.asArray()) {
-            if (!item.isString()) {
+        for (const Value& item : json.AsArray()) {
+            if (!item.IsString()) {
                 return std::nullopt;
             }
-            values.push_back(item.asString());
+            values.push_back(item.AsString());
         }
-        return SettingValue::stringListValue(std::move(values));
+        return SettingValue::StringListValue(std::move(values));
     }
     }
     return std::nullopt;
 }
 
-std::string settingValueToString(const SettingValue& value) {
+std::string SettingValueToString(const SettingValue& value) {
     switch (value.type) {
     case SettingValueType::Bool:
         return std::get<bool>(value.data) ? "true" : "false";
@@ -786,39 +778,39 @@ std::string settingValueToString(const SettingValue& value) {
 PluginStorageService::PluginStorageService(std::filesystem::path root)
     : root_(std::move(root)) {}
 
-void PluginStorageService::setRoot(std::filesystem::path root) {
+void PluginStorageService::SetRoot(std::filesystem::path root) {
     root_ = std::move(root);
 }
 
-Result<void> PluginStorageService::write(std::string pluginId, std::string key, Json value) const {
-    const std::filesystem::path path = pathFor(pluginId, key);
+Result<void> PluginStorageService::Write(std::string plugin_id, std::string key, Value value) const {
+    const std::filesystem::path path = PathFor(plugin_id, key);
     std::error_code error;
     std::filesystem::create_directories(path.parent_path(), error);
     if (error) {
-        return Result<void>::failure("storage.directory", "Failed to create plugin storage directory");
+        return Result<void>::Failure("storage.directory", "Failed to create plugin storage directory");
     }
 
     std::ofstream output(path);
     if (!output) {
-        return Result<void>::failure("storage.write", "Failed to write plugin storage");
+        return Result<void>::Failure("storage.write", "Failed to write plugin storage");
     }
-    output << value.dump();
-    return Result<void>::success();
+    output << ValueToJsonText(value);
+    return Result<void>::Success();
 }
 
-Result<Json> PluginStorageService::read(const std::string& pluginId, const std::string& key) const {
-    const std::filesystem::path path = pathFor(pluginId, key);
+Result<Value> PluginStorageService::Read(const std::string& plugin_id, const std::string& key) const {
+    const std::filesystem::path path = PathFor(plugin_id, key);
     std::ifstream input(path);
     if (!input) {
-        return Result<Json>::failure("storage.read", "Failed to read plugin storage");
+        return Result<Value>::Failure("storage.read", "Failed to read plugin storage");
     }
     std::ostringstream stream;
     stream << input.rdbuf();
-    return Result<Json>::success(Json::parse(stream.str()));
+    return ValueFromJsonText(stream.str());
 }
 
-std::filesystem::path PluginStorageService::pathFor(const std::string& pluginId, const std::string& key) const {
-    return root_ / pluginId / (key + ".json");
+std::filesystem::path PluginStorageService::PathFor(const std::string& plugin_id, const std::string& key) const {
+    return root_ / plugin_id / (key + ".json");
 }
 
 }

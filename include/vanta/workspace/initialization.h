@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 
-#include "vanta/platform/async.h"
-#include "vanta/platform/json.h"
+#include "vanta/core/event.h"
+#include "vanta/core/value.h"
 
 namespace vanta {
 
@@ -31,7 +31,6 @@ struct WorkspaceInitializationStep {
     WorkspaceInitializationStage stage = WorkspaceInitializationStage::WorkspaceOpened;
     WorkspaceInitializationStatus status = WorkspaceInitializationStatus::Pending;
     std::string message;
-    Json data;
 };
 
 struct WorkspaceInitializationChangeEvent {
@@ -40,27 +39,25 @@ struct WorkspaceInitializationChangeEvent {
 
 class WorkspaceInitializationPipeline {
 public:
-    void reset();
-    void start(WorkspaceInitializationStage stage, std::string message = {});
-    void complete(WorkspaceInitializationStage stage, std::string message = {}, Json data = Json::object());
-    void fail(WorkspaceInitializationStage stage, std::string message, Json data = Json::object());
-    std::optional<WorkspaceInitializationStep> step(WorkspaceInitializationStage stage) const;
-    std::vector<WorkspaceInitializationStep> steps() const;
-    bool completed(WorkspaceInitializationStage stage) const;
-    std::uint64_t onDidChangeStep(EventBus<WorkspaceInitializationChangeEvent>::Listener listener);
-    void removeStepListener(std::uint64_t listenerId);
+    void Reset();
+    void Start(WorkspaceInitializationStage stage, std::string message = {});
+    void Complete(WorkspaceInitializationStage stage, std::string message = {});
+    void Fail(WorkspaceInitializationStage stage, std::string message);
+    std::optional<WorkspaceInitializationStep> Step(WorkspaceInitializationStage stage) const;
+    std::vector<WorkspaceInitializationStep> Steps() const;
+    bool Completed(WorkspaceInitializationStage stage) const;
+    std::uint64_t OnDidChangeStep(EventBus<WorkspaceInitializationChangeEvent>::Listener listener);
+    void RemoveStepListener(std::uint64_t listener_id);
 
 private:
-    WorkspaceInitializationStep& ensure(WorkspaceInitializationStage stage);
-    void publish(const WorkspaceInitializationStep& step);
+    WorkspaceInitializationStep& Ensure(WorkspaceInitializationStage stage);
+    void Publish(const WorkspaceInitializationStep& step);
 
     std::map<WorkspaceInitializationStage, WorkspaceInitializationStep> steps_;
-    EventBus<WorkspaceInitializationChangeEvent> onDidChange_;
+    EventBus<WorkspaceInitializationChangeEvent> on_did_change_;
 };
 
-std::string toString(WorkspaceInitializationStage stage);
-std::string toString(WorkspaceInitializationStatus status);
-Json toJson(const WorkspaceInitializationStep& step);
-Json toJson(const std::vector<WorkspaceInitializationStep>& steps);
+std::string ToString(WorkspaceInitializationStage stage);
+std::string ToString(WorkspaceInitializationStatus status);
 
 }

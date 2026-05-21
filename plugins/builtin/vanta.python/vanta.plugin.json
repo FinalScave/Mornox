@@ -1,0 +1,19 @@
+{
+  "id": "vanta.python",
+  "name": "Python Platform Support",
+  "version": "0.1.0",
+  "publisher": "Vanta",
+  "runtime": {
+    "kind": "core",
+    "entry": "builtin:python"
+  },
+  "activationEvents": [
+    "onLanguage:python",
+    "onWorkspaceContains:pyproject.toml",
+    "onWorkspaceContains:requirements.txt"
+  ],
+  "permissions": [
+    "workspace.read",
+    "process.execute"
+  ]
+}

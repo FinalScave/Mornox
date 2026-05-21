@@ -1,7 +1,5 @@
-#include "vanta/execution/run_configuration.h"
+#include "execution/run_configuration_registry_impl.h"
 
-#include <algorithm>
-#include <cctype>
 #include <exception>
 #include <filesystem>
 #include <future>
@@ -9,7 +7,8 @@
 #include <sstream>
 #include <utility>
 
-#include "vanta/execution/problem_matcher.h"
+#include "core/value_projection.h"
+#include "vanta/core/json_codec.h"
 #include "vanta/project/project.h"
 #include "vanta/project/project_manager.h"
 #include "vanta/workspace/workspace_context.h"
@@ -18,457 +17,155 @@
 namespace vanta {
 namespace {
 
-std::vector<std::string> stringArrayFromJson(const Json &object,
-                                             const std::string &key) {
-  std::vector<std::string> values;
-  if (!object.isObject() || !object.contains(key) || !object[key].isArray()) {
-    return values;
-  }
-  for (const Json &item : object[key].asArray()) {
-    if (item.isString()) {
-      values.push_back(item.asString());
-    }
-  }
-  return values;
-}
-
-std::optional<std::string> optionalString(const Json &object,
-                                          const std::string &key) {
-  if (!object.isObject()) {
-    return std::nullopt;
-  }
-  return object.stringValue(key);
-}
-
-std::string dataString(const RunConfiguration &configuration,
-                       const std::string &key,
-                       const std::string &fallback = {}) {
-  return optionalString(configuration.data, key).value_or(fallback);
-}
-
-std::string lowercase(std::string value) {
-  std::transform(value.begin(), value.end(), value.begin(),
-                 [](unsigned char character) {
-                   return static_cast<char>(std::tolower(character));
-                 });
-  return value;
-}
-
-std::string normalizedExtension(const VirtualFile &file) {
-  std::string extension = lowercase(file.extension());
-  if (!extension.empty() && extension.front() == '.') {
-    extension.erase(extension.begin());
-  }
-  return extension;
-}
-
-bool isCppFile(const VirtualFile &file) {
-  const std::string extension = normalizedExtension(file);
-  return extension == "cpp" || extension == "cxx" || extension == "cc" ||
-         extension == "c";
-}
-
-bool isPythonFile(const VirtualFile &file) {
-  return normalizedExtension(file) == "py";
-}
-
-std::string defaultStandard(const VirtualFile &file) {
-  return normalizedExtension(file) == "c" ? "c17" : "c++20";
-}
-
-std::string sanitizeId(std::string value) {
-  for (char &character : value) {
-    const bool allowed = std::isalnum(static_cast<unsigned char>(character)) ||
-                         character == '-' || character == '_' ||
-                         character == '.';
-    if (!allowed) {
-      character = '_';
-    }
-  }
-  return value.empty() ? "file" : value;
-}
-
-ValidationResult missing(const std::string &message) {
+ValidationResult Missing(const std::string &message) {
   return {
       .ok = false,
       .messages = {message},
   };
 }
 
-Json diagnosticToJson(const Diagnostic &diagnostic) {
-  return Json::object({
-      {"file", Json(diagnostic.location.file.toUri().string())},
-      {"line", Json(static_cast<std::int64_t>(diagnostic.location.line))},
-      {"column", Json(static_cast<std::int64_t>(diagnostic.location.column))},
-      {"severity", Json(toString(diagnostic.severity))},
-      {"source", Json(diagnostic.source)},
-      {"message", Json(diagnostic.message)},
+std::vector<std::string> StringsFromValue(const Value& value) {
+  std::vector<std::string> values;
+  if (!value.IsArray()) {
+    return values;
+  }
+  for (const Value& item : value.AsArray()) {
+    if (item.IsString()) {
+      values.push_back(item.AsString());
+    }
+  }
+  return values;
+}
+
+Value StringsProjection(const std::vector<std::string>& values) {
+  Value::Array array;
+  for (const std::string& value : values) {
+    array.push_back(Value(value));
+  }
+  return Value::ArrayValue(std::move(array));
+}
+
+const CustomCommandRunConfigurationPayload* CustomCommandPayload(const RunConfiguration& configuration) {
+  return dynamic_cast<const CustomCommandRunConfigurationPayload*>(configuration.payload.get());
+}
+
+Value CustomCommandPayloadProjection(const CustomCommandRunConfigurationPayload& payload) {
+  return Value::ObjectValue({
+      {"executable", Value(payload.executable)},
+      {"arguments", StringsProjection(payload.arguments)},
+      {"workingDirectory", Value(payload.working_directory.string())},
+  });
+}
+
+Value RunConfigurationState(const RunConfiguration& configuration, const RunConfigurationType* type) {
+  return Value::ObjectValue({
+      {"id", Value(configuration.id)},
+      {"name", Value(configuration.name)},
+      {"typeId", Value(configuration.type_id)},
+      {"targetId", Value(configuration.target_id)},
+      {"data", type == nullptr || configuration.payload == nullptr ? Value::ObjectValue() : type->SerializePayload(*configuration.payload)},
+      {"temporary", Value(configuration.temporary)},
   });
 }
 
 class CustomCommandRunConfigurationType final : public RunConfigurationType {
 public:
-  std::string id() const override { return "custom.command"; }
+  std::string Id() const override { return "custom.command"; }
 
-  std::string title() const override { return "Custom Command"; }
+  std::string Title() const override { return "Custom Command"; }
 
-  Json defaultData(WorkspaceContext &context) const override {
-    return Json::object({
-        {"executable", Json("")},
-        {"arguments", Json::array()},
-        {"workingDirectory",
-         Json(context.workspace().info().rootPath.string())},
-    });
+  std::unique_ptr<RunConfigurationPayload> DefaultPayload(WorkspaceContext &context) const override {
+    auto payload = std::make_unique<CustomCommandRunConfigurationPayload>();
+    payload->working_directory = context.CurrentWorkspace().Info().root_path;
+    return payload;
   }
 
-  std::vector<ConfigurationField> fields() const override {
+  std::unique_ptr<RunConfigurationPayload> DeserializePayload(const Value& value) const override {
+    return CustomCommandRunConfigurationPayload::FromValue(value);
+  }
+
+  Value SerializePayload(const RunConfigurationPayload& payload) const override {
+    const auto* custom_payload = dynamic_cast<const CustomCommandRunConfigurationPayload*>(&payload);
+    return custom_payload == nullptr ? Value::ObjectValue() : CustomCommandPayloadProjection(*custom_payload);
+  }
+
+  std::vector<ConfigurationField> Fields() const override {
     return {
         {.id = "executable",
          .title = "Executable",
          .type = "string",
-         .defaultValue = Json(""),
+         .default_value = Value(""),
          .required = true},
         {.id = "arguments",
          .title = "Arguments",
          .type = "stringArray",
-         .defaultValue = Json::array(),
+         .default_value = Value::ArrayValue(),
          .required = false},
         {.id = "workingDirectory",
          .title = "Working Directory",
          .type = "path",
-         .defaultValue = Json(""),
+         .default_value = Value(""),
          .required = false},
     };
   }
 
   ValidationResult
-  validate(WorkspaceContext &context,
+  Validate(WorkspaceContext &context,
            const RunConfiguration &configuration) const override {
     (void)context;
-    if (dataString(configuration, "executable").empty()) {
-      return missing("Executable is required");
+    const CustomCommandRunConfigurationPayload* payload = CustomCommandPayload(configuration);
+    if (payload == nullptr || payload->executable.empty()) {
+      return Missing("Executable is required");
     }
     return {};
   }
 
-  RunResult run(RunExecutionContext &context,
+  RunResult Run(RunExecutionContext &context,
                 const RunConfiguration &configuration) const override {
-    std::filesystem::path workingDirectory =
-        dataString(configuration, "workingDirectory");
-    if (workingDirectory.empty()) {
-      workingDirectory = context.workspace.workspace().info().rootPath;
+    const CustomCommandRunConfigurationPayload* payload = CustomCommandPayload(configuration);
+    if (payload == nullptr) {
+      return {.exit_code = -1, .output = "Run configuration payload is invalid\n", .job_id = context.job_id};
+    }
+    std::filesystem::path working_directory = payload->working_directory;
+    if (working_directory.empty()) {
+      working_directory = context.workspace.CurrentWorkspace().Info().root_path;
     }
 
-    const ExecutionResult execution = context.workspace.execution().execute(
+    const ExecutionResult execution = context.workspace.Execution().Execute(
+        context.workspace,
         {
-            .executable = dataString(configuration, "executable"),
-            .arguments = stringArrayFromJson(configuration.data, "arguments"),
-            .workingDirectory = workingDirectory,
-            .jobId = context.jobId,
+            .executable = payload->executable,
+            .arguments = payload->arguments,
+            .working_directory = working_directory,
+            .job_id = context.job_id,
         },
         context.target);
     return {
-        .exitCode = execution.exitCode,
+        .exit_code = execution.exit_code,
         .output = execution.output,
         .diagnostics = {},
-        .jobId = context.jobId,
+        .job_id = context.job_id,
     };
   }
 };
 
-class CppSingleFileRunConfigurationType final : public RunConfigurationType {
-public:
-  std::string id() const override { return "cpp.singleFile"; }
-
-  std::string title() const override { return "C++ Single File"; }
-
-  Json defaultData(WorkspaceContext &context) const override {
-    return Json::object({
-        {"file", Json("")},
-        {"standard", Json("c++20")},
-        {"arguments", Json::array()},
-        {"workingDirectory",
-         Json(context.workspace().info().rootPath.string())},
-    });
-  }
-
-  std::vector<ConfigurationField> fields() const override {
-    return {
-        {.id = "file",
-         .title = "File",
-         .type = "file",
-         .defaultValue = Json(""),
-         .required = true},
-        {.id = "standard",
-         .title = "Standard",
-         .type = "string",
-         .defaultValue = Json("c++20"),
-         .required = false},
-        {.id = "arguments",
-         .title = "Arguments",
-         .type = "stringArray",
-         .defaultValue = Json::array(),
-         .required = false},
-        {.id = "workingDirectory",
-         .title = "Working Directory",
-         .type = "path",
-         .defaultValue = Json(""),
-         .required = false},
-    };
-  }
-
-  ValidationResult
-  validate(WorkspaceContext &context,
-           const RunConfiguration &configuration) const override {
-    const VirtualFile file =
-        context.workspace().file(dataString(configuration, "file"));
-    if (!file.valid() || !file.exists()) {
-      return missing("File does not exist");
-    }
-    if (!isCppFile(file)) {
-      return missing("File is not a C or C++ source file");
-    }
-    return {};
-  }
-
-  RunResult run(RunExecutionContext &context,
-                const RunConfiguration &configuration) const override {
-    const VirtualFile file =
-        context.workspace.workspace().file(dataString(configuration, "file"));
-    const auto localPath = file.localPath();
-    if (!localPath) {
-      return {.exitCode = -1,
-              .output = "File is not backed by a local path\n",
-              .jobId = context.jobId};
-    }
-
-    std::filesystem::path workingDirectory =
-        dataString(configuration, "workingDirectory");
-    if (workingDirectory.empty()) {
-      workingDirectory = localPath->parent_path();
-    }
-
-    std::error_code error;
-    const std::filesystem::path runDirectory =
-        context.workspace.workspace().info().rootPath / ".vanta" / "run";
-    std::filesystem::create_directories(runDirectory, error);
-    if (error) {
-      return {.exitCode = -1,
-              .output = "Could not create run directory\n",
-              .jobId = context.jobId};
-    }
-
-    std::filesystem::path executablePath =
-        runDirectory / sanitizeId(localPath->stem().string());
-#ifdef _WIN32
-    executablePath += ".exe";
-#endif
-
-    std::vector<std::string> compileArguments;
-    compileArguments.push_back(
-        "-std=" + dataString(configuration, "standard", defaultStandard(file)));
-    compileArguments.push_back(localPath->string());
-    compileArguments.push_back("-o");
-    compileArguments.push_back(executablePath.string());
-    const ExecutionResult compile = context.workspace.execution().execute(
-        {
-            .executable = normalizedExtension(file) == "c" ? "cc" : "c++",
-            .arguments = compileArguments,
-            .workingDirectory = workingDirectory,
-            .jobId = context.jobId,
-        },
-        context.target);
-
-    RunResult result;
-    result.exitCode = compile.exitCode;
-    result.output = compile.output;
-    result.jobId = context.jobId;
-    const ProblemMatcher matcher;
-    const DiagnosticResolver resolver;
-    result.diagnostics =
-        resolver.resolve(matcher.matchCompilerOutput(result.output),
-                         context.workspace.workspace(), workingDirectory);
-    if (compile.exitCode != 0) {
-      return result;
-    }
-
-    const ExecutionResult run = context.workspace.execution().execute(
-        {
-            .executable = executablePath.string(),
-            .arguments = stringArrayFromJson(configuration.data, "arguments"),
-            .workingDirectory = workingDirectory,
-            .jobId = context.jobId,
-        },
-        context.target);
-    result.exitCode = run.exitCode;
-    result.output += run.output;
-    return result;
-  }
-};
-
-class PythonScriptRunConfigurationType final : public RunConfigurationType {
-public:
-  std::string id() const override { return "python.script"; }
-
-  std::string title() const override { return "Python Script"; }
-
-  Json defaultData(WorkspaceContext &context) const override {
-    return Json::object({
-        {"file", Json("")},
-        {"arguments", Json::array()},
-        {"workingDirectory",
-         Json(context.workspace().info().rootPath.string())},
-    });
-  }
-
-  std::vector<ConfigurationField> fields() const override {
-    return {
-        {.id = "file",
-         .title = "File",
-         .type = "file",
-         .defaultValue = Json(""),
-         .required = true},
-        {.id = "arguments",
-         .title = "Arguments",
-         .type = "stringArray",
-         .defaultValue = Json::array(),
-         .required = false},
-        {.id = "workingDirectory",
-         .title = "Working Directory",
-         .type = "path",
-         .defaultValue = Json(""),
-         .required = false},
-    };
-  }
-
-  ValidationResult
-  validate(WorkspaceContext &context,
-           const RunConfiguration &configuration) const override {
-    const VirtualFile file =
-        context.workspace().file(dataString(configuration, "file"));
-    if (!file.valid() || !file.exists()) {
-      return missing("File does not exist");
-    }
-    if (!isPythonFile(file)) {
-      return missing("File is not a Python script");
-    }
-    return {};
-  }
-
-  RunResult run(RunExecutionContext &context,
-                const RunConfiguration &configuration) const override {
-    const VirtualFile file =
-        context.workspace.workspace().file(dataString(configuration, "file"));
-    const auto localPath = file.localPath();
-    if (!localPath) {
-      return {.exitCode = -1,
-              .output = "File is not backed by a local path\n",
-              .jobId = context.jobId};
-    }
-    std::filesystem::path workingDirectory =
-        dataString(configuration, "workingDirectory");
-    if (workingDirectory.empty()) {
-      workingDirectory = localPath->parent_path();
-    }
-
-    std::vector<std::string> arguments;
-    arguments.push_back(localPath->string());
-    for (const std::string &argument :
-         stringArrayFromJson(configuration.data, "arguments")) {
-      arguments.push_back(argument);
-    }
-    const ExecutionResult execution = context.workspace.execution().execute(
-        {
-            .executable = "python3",
-            .arguments = arguments,
-            .workingDirectory = workingDirectory,
-            .jobId = context.jobId,
-        },
-        context.target);
-    return {
-        .exitCode = execution.exitCode,
-        .output = execution.output,
-        .diagnostics = {},
-        .jobId = context.jobId,
-    };
-  }
-};
-
-class SingleFileRunConfigurationProducer final
-    : public RunConfigurationProducer {
-public:
-  std::string id() const override { return "vanta.singleFileRunProducer"; }
-
-  std::vector<RunConfiguration>
-  produce(WorkspaceContext &context,
-          const VirtualFile &focusFile) const override {
-    VirtualFile file = focusFile;
-    if (!file.valid()) {
-      if (const auto *singleFile =
-              context.requireProject().model().attachment<SingleFileModel>(
-                  SingleFileModel::attachmentId)) {
-        file = singleFile->file;
-      }
-    }
-    if (!file.valid()) {
-      return {};
-    }
-    const auto localPath = file.localPath();
-    if (!localPath) {
-      return {};
-    }
-
-    std::vector<RunConfiguration> configurations;
-    if (isCppFile(file)) {
-      configurations.push_back({
-          .id = "temp.cpp." + sanitizeId(file.toUri().string()),
-          .name = "Run " + file.displayName(),
-          .typeId = "cpp.singleFile",
-          .targetId = "local.default",
-          .data = Json::object({
-              {"file", Json(localPath->string())},
-              {"standard", Json(defaultStandard(file))},
-              {"arguments", Json::array()},
-              {"workingDirectory", Json(localPath->parent_path().string())},
-          }),
-          .temporary = true,
-      });
-    } else if (isPythonFile(file)) {
-      configurations.push_back({
-          .id = "temp.python." + sanitizeId(file.toUri().string()),
-          .name = "Run " + file.displayName(),
-          .typeId = "python.script",
-          .targetId = "local.default",
-          .data = Json::object({
-              {"file", Json(localPath->string())},
-              {"arguments", Json::array()},
-              {"workingDirectory", Json(localPath->parent_path().string())},
-          }),
-          .temporary = true,
-      });
-    }
-    return configurations;
-  }
-};
-
-std::optional<RunConfiguration> configurationFromJson(const Json &item) {
-  if (!item.isObject()) {
+std::optional<RunConfiguration> ConfigurationFromValue(const Value& item, RunConfigurationType* type) {
+  if (!item.IsObject()) {
     return std::nullopt;
   }
   RunConfiguration configuration;
-  configuration.id = item.stringValue("id").value_or("");
-  configuration.name = item.stringValue("name").value_or(configuration.id);
-  configuration.typeId = item.stringValue("typeId").value_or("");
-  configuration.targetId = item.stringValue("targetId").value_or("");
-  if (item.contains("data") && item["data"].isObject()) {
-    configuration.data = item["data"];
-  } else {
-    configuration.data = Json::object();
+  configuration.id = item.StringValue("id").value_or("");
+  configuration.name = item.StringValue("name").value_or(configuration.id);
+  configuration.type_id = item.StringValue("typeId").value_or("");
+  configuration.target_id = item.StringValue("targetId").value_or("");
+  if (type != nullptr) {
+    configuration.payload = type->DeserializePayload(item.Contains("data") ? item["data"] : Value::ObjectValue());
   }
-  if (item.contains("temporary") && item["temporary"].isBool()) {
-    configuration.temporary = item["temporary"].asBool();
+  configuration.temporary = item.BoolValue("temporary").value_or(configuration.temporary);
+  if (configuration.id.empty() || configuration.type_id.empty()) {
+    return std::nullopt;
   }
-  if (configuration.id.empty() || configuration.typeId.empty()) {
+  if (configuration.payload == nullptr) {
     return std::nullopt;
   }
   return configuration;
@@ -476,25 +173,69 @@ std::optional<RunConfiguration> configurationFromJson(const Json &item) {
 
 } // namespace
 
-void RunConfigurationService::addType(
-    std::unique_ptr<RunConfigurationType> type) {
-  if (type == nullptr || type->id().empty()) {
-    return;
-  }
-  types_[type->id()] = std::move(type);
+std::unique_ptr<RunConfigurationPayload> CustomCommandRunConfigurationPayload::Clone() const {
+  return std::make_unique<CustomCommandRunConfigurationPayload>(*this);
 }
 
-void RunConfigurationService::removeType(const std::string &typeId) {
-  types_.erase(typeId);
+std::unique_ptr<RunConfigurationPayload> CustomCommandRunConfigurationPayload::FromValue(const Value& value) {
+  auto payload = std::make_unique<CustomCommandRunConfigurationPayload>();
+  if (!value.IsObject()) {
+    return payload;
+  }
+  payload->executable = value.StringValue("executable").value_or("");
+  if (value.Contains("arguments")) {
+    payload->arguments = StringsFromValue(value["arguments"]);
+  }
+  if (auto working_directory = value.StringValue("workingDirectory")) {
+    payload->working_directory = *working_directory;
+  }
+  return payload;
+}
+
+RunConfiguration::RunConfiguration(const RunConfiguration& other)
+    : id(other.id),
+      name(other.name),
+      type_id(other.type_id),
+      target_id(other.target_id),
+      payload(other.payload == nullptr ? nullptr : other.payload->Clone()),
+      temporary(other.temporary) {}
+
+RunConfiguration& RunConfiguration::operator=(const RunConfiguration& other) {
+  if (this == &other) {
+    return *this;
+  }
+  id = other.id;
+  name = other.name;
+  type_id = other.type_id;
+  target_id = other.target_id;
+  payload = other.payload == nullptr ? nullptr : other.payload->Clone();
+  temporary = other.temporary;
+  return *this;
+}
+
+RegistrationHandle internal::RunConfigurationRegistryImpl::RegisterType(
+    std::unique_ptr<RunConfigurationType> type) {
+  if (type == nullptr || type->Id().empty()) {
+    return {};
+  }
+  const std::string id = type->Id();
+  types_[id] = std::move(type);
+  return RegistrationHandle([this, id] {
+    RemoveType(id);
+  });
+}
+
+void internal::RunConfigurationRegistryImpl::RemoveType(const std::string &type_id) {
+  types_.erase(type_id);
 }
 
 RunConfigurationType *
-RunConfigurationService::type(const std::string &typeId) const {
-  auto it = types_.find(typeId);
+internal::RunConfigurationRegistryImpl::Type(const std::string &type_id) const {
+  auto it = types_.find(type_id);
   return it == types_.end() ? nullptr : it->second.get();
 }
 
-std::vector<std::string> RunConfigurationService::typeIds() const {
+std::vector<std::string> internal::RunConfigurationRegistryImpl::TypeIds() const {
   std::vector<std::string> ids;
   for (const auto &[id, type] : types_) {
     (void)type;
@@ -503,19 +244,23 @@ std::vector<std::string> RunConfigurationService::typeIds() const {
   return ids;
 }
 
-void RunConfigurationService::addProducer(
+RegistrationHandle internal::RunConfigurationRegistryImpl::RegisterProducer(
     std::unique_ptr<RunConfigurationProducer> producer) {
-  if (producer == nullptr || producer->id().empty()) {
-    return;
+  if (producer == nullptr || producer->Id().empty()) {
+    return {};
   }
-  producers_[producer->id()] = std::move(producer);
+  const std::string id = producer->Id();
+  producers_[id] = std::move(producer);
+  return RegistrationHandle([this, id] {
+    RemoveProducer(id);
+  });
 }
 
-void RunConfigurationService::removeProducer(const std::string &producerId) {
-  producers_.erase(producerId);
+void internal::RunConfigurationRegistryImpl::RemoveProducer(const std::string &producer_id) {
+  producers_.erase(producer_id);
 }
 
-std::vector<std::string> RunConfigurationService::producerIds() const {
+std::vector<std::string> internal::RunConfigurationRegistryImpl::ProducerIds() const {
   std::vector<std::string> ids;
   for (const auto &[id, producer] : producers_) {
     (void)producer;
@@ -524,238 +269,216 @@ std::vector<std::string> RunConfigurationService::producerIds() const {
   return ids;
 }
 
-void RunConfigurationService::addConfiguration(RunConfiguration configuration) {
-  if (configuration.id.empty() || configuration.typeId.empty()) {
+std::vector<RunConfiguration>
+internal::RunConfigurationRegistryImpl::Produce(WorkspaceContext &context,
+                                 const VirtualFile &focus_file) const {
+  std::vector<RunConfiguration> values;
+  for (const auto &[id, producer] : producers_) {
+    (void)id;
+    std::vector<RunConfiguration> produced =
+        producer->Produce(context, focus_file);
+    values.insert(values.end(), produced.begin(), produced.end());
+  }
+  return values;
+}
+
+RunResult internal::RunConfigurationRegistryImpl::Run(WorkspaceContext &context,
+                                       const std::string &configuration_id,
+                                       const std::string &target_id) const {
+  const Project* project = context.CurrentProject();
+  const ProjectRunConfigurations* configurations =
+      project == nullptr ? nullptr : project->GetComponent<ProjectRunConfigurations>(ProjectRunConfigurations::kComponentId);
+  const auto configuration_value =
+      configurations == nullptr ? std::optional<RunConfiguration>() : configurations->Configuration(configuration_id);
+  if (!configuration_value) {
+    return {.exit_code = -1, .output = "Run configuration not found\n"};
+  }
+  const RunConfiguration &configuration = *configuration_value;
+  RunConfigurationType *type_value = Type(configuration.type_id);
+  if (type_value == nullptr) {
+    return {.exit_code = -1, .output = "Run configuration type not found\n"};
+  }
+
+  const ValidationResult validation =
+      type_value->Validate(context, configuration);
+  if (!validation.ok) {
+    std::ostringstream output;
+    for (const std::string &message : validation.messages) {
+      output << message << '\n';
+    }
+    return {.exit_code = -1, .output = output.str()};
+  }
+
+  std::vector<ExecutionTarget> available_targets = context.Execution().Targets(context);
+  const std::string resolved_target_id =
+      target_id.empty() ? configuration.target_id : target_id;
+  auto target_it = available_targets.begin();
+  if (!resolved_target_id.empty()) {
+    target_it = std::find_if(available_targets.begin(), available_targets.end(),
+                            [&](const ExecutionTarget &target) {
+                              return target.id == resolved_target_id;
+                            });
+  }
+  if (target_it == available_targets.end()) {
+    return {.exit_code = -1, .output = "Run target not found\n"};
+  }
+
+  auto result_promise = std::make_shared<std::promise<RunResult>>();
+  std::future<RunResult> result_future = result_promise->get_future();
+  const ExecutionTarget target = *target_it;
+  JobHandle handle = context.Jobs().Submit(
+      context.Async(),
+      {
+          .kind = JobKind::Run,
+          .title = configuration.name.empty() ? configuration.id
+                                              : configuration.name,
+      },
+      [&context, type_value, configuration, target,
+       result_promise](JobContext &job) mutable {
+        try {
+          job.Report(0.1, "Run started");
+          RunExecutionContext execution_context{
+              .workspace = context,
+              .job_id = job.Id(),
+              .target = target,
+          };
+          RunResult result = type_value->Run(execution_context, configuration);
+          result.job_id = job.Id();
+          if (!context.Jobs().IsTerminal(job.Id()) && !result.output.empty()) {
+            job.AppendOutput(result.output);
+          }
+          result_promise->set_value(result);
+          return JobResult{
+              .success = result.exit_code == 0,
+              .payload = internal::RunResultProjection(result),
+          };
+        } catch (const std::exception &error) {
+          RunResult result{
+              .exit_code = -1,
+              .output = std::string(error.what()) + "\n",
+              .job_id = job.Id(),
+          };
+          result_promise->set_value(result);
+          return JobResult{
+              .success = false,
+              .message = error.what(),
+              .payload = internal::RunResultProjection(result),
+          };
+        } catch (...) {
+          RunResult result{
+              .exit_code = -1,
+              .output = "Run failed\n",
+              .job_id = job.Id(),
+          };
+          result_promise->set_value(result);
+          return JobResult{
+              .success = false,
+              .message = "Run failed",
+              .payload = internal::RunResultProjection(result),
+          };
+        }
+      });
+  RunResult result = result_future.get();
+  handle.Wait();
+  return result;
+}
+
+std::string ProjectRunConfigurations::Id() const { return kComponentId; }
+
+void ProjectRunConfigurations::OnAttach(WorkspaceContext& context) {
+  context_ = &context;
+}
+
+void ProjectRunConfigurations::RestoreState(const Value& state) {
+  configurations_.clear();
+  if (!state.IsObject() || !state.Contains("configurations") ||
+      !state["configurations"].IsArray()) {
+    return;
+  }
+  for (const Value& item : state["configurations"].AsArray()) {
+    const std::string type_id = item.IsObject() ? item.StringValue("typeId").value_or("") : "";
+    RunConfigurationType* type = context_ == nullptr ? nullptr : context_->RunConfigurations().Type(type_id);
+    if (auto configuration = ConfigurationFromValue(item, type)) {
+      configuration->temporary = false;
+      AddConfiguration(std::move(*configuration));
+    }
+  }
+}
+
+Value ProjectRunConfigurations::SaveState() const {
+  Value::Array configurations;
+  for (const RunConfiguration &configuration : this->Configurations(false)) {
+    RunConfigurationType* type = context_ == nullptr ? nullptr : context_->RunConfigurations().Type(configuration.type_id);
+    configurations.push_back(RunConfigurationState(configuration, type));
+  }
+  return Value::ObjectValue({
+      {"schemaVersion", Value(static_cast<std::int64_t>(1))},
+      {"configurations", Value::ArrayValue(std::move(configurations))},
+  });
+}
+
+void ProjectRunConfigurations::AddConfiguration(RunConfiguration configuration) {
+  if (configuration.id.empty() || configuration.type_id.empty()) {
+    return;
+  }
+  if (configuration.payload == nullptr && context_ != nullptr) {
+    if (RunConfigurationType* type = context_->RunConfigurations().Type(configuration.type_id)) {
+      configuration.payload = type->DefaultPayload(*context_);
+    }
+  }
+  if (configuration.payload == nullptr) {
     return;
   }
   configurations_[configuration.id] = std::move(configuration);
 }
 
-bool RunConfigurationService::removeConfiguration(
-    const std::string &configurationId) {
-  return configurations_.erase(configurationId) > 0;
+RegistrationHandle ProjectRunConfigurations::RegisterConfiguration(RunConfiguration configuration) {
+  if (configuration.id.empty()) {
+    return {};
+  }
+  const std::string id = configuration.id;
+  AddConfiguration(std::move(configuration));
+  return RegistrationHandle([this, id] {
+    RemoveConfiguration(id);
+  });
 }
 
-std::optional<RunConfiguration> RunConfigurationService::configuration(
-    const std::string &configurationId) const {
-  auto it = configurations_.find(configurationId);
+bool ProjectRunConfigurations::RemoveConfiguration(
+    const std::string &configuration_id) {
+  return configurations_.erase(configuration_id) > 0;
+}
+
+std::optional<RunConfiguration> ProjectRunConfigurations::Configuration(
+    const std::string &configuration_id) const {
+  auto it = configurations_.find(configuration_id);
   return it == configurations_.end()
              ? std::nullopt
              : std::optional<RunConfiguration>(it->second);
 }
 
 std::vector<RunConfiguration>
-RunConfigurationService::configurations(bool includeTemporary) const {
+ProjectRunConfigurations::Configurations(bool include_temporary) const {
   std::vector<RunConfiguration> values;
   for (const auto &[id, configuration] : configurations_) {
     (void)id;
-    if (includeTemporary || !configuration.temporary) {
+    if (include_temporary || !configuration.temporary) {
       values.push_back(configuration);
     }
   }
   return values;
 }
 
-void RunConfigurationService::setConfigurations(
+void ProjectRunConfigurations::SetConfigurations(
     std::vector<RunConfiguration> configurations) {
   configurations_.clear();
   for (RunConfiguration &configuration : configurations) {
-    addConfiguration(std::move(configuration));
+    AddConfiguration(std::move(configuration));
   }
 }
 
-std::vector<RunConfiguration>
-RunConfigurationService::produce(WorkspaceContext &context,
-                                 const VirtualFile &focusFile) const {
-  std::vector<RunConfiguration> values;
-  for (const auto &[id, producer] : producers_) {
-    (void)id;
-    std::vector<RunConfiguration> produced =
-        producer->produce(context, focusFile);
-    values.insert(values.end(), produced.begin(), produced.end());
-  }
-  return values;
-}
-
-RunResult RunConfigurationService::run(WorkspaceContext &context,
-                                       const std::string &configurationId,
-                                       const std::string &targetId) const {
-  const auto configurationValue = configuration(configurationId);
-  if (!configurationValue) {
-    return {.exitCode = -1, .output = "Run configuration not found\n"};
-  }
-  const RunConfiguration &configuration = *configurationValue;
-  RunConfigurationType *typeValue = type(configuration.typeId);
-  if (typeValue == nullptr) {
-    return {.exitCode = -1, .output = "Run configuration type not found\n"};
-  }
-
-  const ValidationResult validation =
-      typeValue->validate(context, configuration);
-  if (!validation.ok) {
-    std::ostringstream output;
-    for (const std::string &message : validation.messages) {
-      output << message << '\n';
-    }
-    return {.exitCode = -1, .output = output.str()};
-  }
-
-  std::vector<ExecutionTarget> availableTargets = context.execution().targets();
-  const std::string resolvedTargetId =
-      targetId.empty() ? configuration.targetId : targetId;
-  auto targetIt = availableTargets.begin();
-  if (!resolvedTargetId.empty()) {
-    targetIt = std::find_if(availableTargets.begin(), availableTargets.end(),
-                            [&](const ExecutionTarget &target) {
-                              return target.id == resolvedTargetId;
-                            });
-  }
-  if (targetIt == availableTargets.end()) {
-    return {.exitCode = -1, .output = "Run target not found\n"};
-  }
-
-  auto resultPromise = std::make_shared<std::promise<RunResult>>();
-  std::future<RunResult> resultFuture = resultPromise->get_future();
-  const ExecutionTarget target = *targetIt;
-  JobHandle handle = context.jobs().submit(
-      context.runtime()->async(),
-      {
-          .kind = JobKind::Run,
-          .title = configuration.name.empty() ? configuration.id
-                                              : configuration.name,
-      },
-      [&context, typeValue, configuration, target,
-       resultPromise](JobContext &job) mutable {
-        try {
-          job.report(0.1, "Run started");
-          RunExecutionContext executionContext{
-              .workspace = context,
-              .jobId = job.id(),
-              .target = target,
-          };
-          RunResult result = typeValue->run(executionContext, configuration);
-          result.jobId = job.id();
-          if (!context.jobs().isTerminal(job.id()) && !result.output.empty()) {
-            job.appendOutput(result.output);
-          }
-          resultPromise->set_value(result);
-          return JobResult{
-              .success = result.exitCode == 0,
-              .data = toJson(result),
-          };
-        } catch (const std::exception &error) {
-          RunResult result{
-              .exitCode = -1,
-              .output = std::string(error.what()) + "\n",
-              .jobId = job.id(),
-          };
-          resultPromise->set_value(result);
-          return JobResult{
-              .success = false,
-              .message = error.what(),
-              .data = toJson(result),
-          };
-        } catch (...) {
-          RunResult result{
-              .exitCode = -1,
-              .output = "Run failed\n",
-              .jobId = job.id(),
-          };
-          resultPromise->set_value(result);
-          return JobResult{
-              .success = false,
-              .message = "Run failed",
-              .data = toJson(result),
-          };
-        }
-      });
-  RunResult result = resultFuture.get();
-  handle.wait();
-  return result;
-}
-
-std::string RunConfigurationComponent::id() const { return componentId; }
-
-void RunConfigurationComponent::onAttach(WorkspaceContext &context) {
-  service_ = &context.runConfigurations();
-  if (!restoredConfigurations_.empty()) {
-    service_->setConfigurations(restoredConfigurations_);
-  }
-}
-
-void RunConfigurationComponent::restoreState(const Json &state) {
-  restoredConfigurations_.clear();
-  if (!state.isObject() || !state.contains("configurations") ||
-      !state["configurations"].isArray()) {
-    return;
-  }
-  for (const Json &item : state["configurations"].asArray()) {
-    if (auto configuration = configurationFromJson(item)) {
-      configuration->temporary = false;
-      restoredConfigurations_.push_back(std::move(*configuration));
-    }
-  }
-  if (service_ != nullptr) {
-    service_->setConfigurations(restoredConfigurations_);
-  }
-}
-
-Json RunConfigurationComponent::saveState() const {
-  Json::Array configurations;
-  if (service_ != nullptr) {
-    for (const RunConfiguration &configuration :
-         service_->configurations(false)) {
-      configurations.push_back(toJson(configuration));
-    }
-  }
-  return Json::object({
-      {"schemaVersion", Json(static_cast<std::int64_t>(1))},
-      {"configurations", Json::array(std::move(configurations))},
-  });
-}
-
-void RunConfigurationComponent::onDetach() { service_ = nullptr; }
-
-void registerDefaultRunConfigurationProviders(
-    RunConfigurationService &service) {
-  service.addType(std::make_unique<CustomCommandRunConfigurationType>());
-  service.addType(std::make_unique<CppSingleFileRunConfigurationType>());
-  service.addType(std::make_unique<PythonScriptRunConfigurationType>());
-  service.addProducer(std::make_unique<SingleFileRunConfigurationProducer>());
-}
-
-Json toJson(const ConfigurationField &field) {
-  return Json::object({
-      {"id", Json(field.id)},
-      {"title", Json(field.title)},
-      {"type", Json(field.type)},
-      {"defaultValue", field.defaultValue},
-      {"required", Json(field.required)},
-  });
-}
-
-Json toJson(const RunConfiguration &configuration) {
-  return Json::object({
-      {"id", Json(configuration.id)},
-      {"name", Json(configuration.name)},
-      {"typeId", Json(configuration.typeId)},
-      {"targetId", Json(configuration.targetId)},
-      {"data", configuration.data},
-      {"temporary", Json(configuration.temporary)},
-  });
-}
-
-Json toJson(const RunResult &result) {
-  Json::Array diagnostics;
-  for (const Diagnostic &diagnostic : result.diagnostics) {
-    diagnostics.push_back(diagnosticToJson(diagnostic));
-  }
-  return Json::object({
-      {"exitCode", Json(static_cast<std::int64_t>(result.exitCode))},
-      {"output", Json(result.output)},
-      {"diagnostics", Json::array(std::move(diagnostics))},
-      {"jobId", Json(static_cast<std::int64_t>(result.jobId))},
-  });
+void RegisterDefaultRunConfigurationProviders(
+    RunConfigurationRegistry &catalog) {
+  catalog.RegisterType(std::make_unique<CustomCommandRunConfigurationType>());
 }
 
 } // namespace vanta
