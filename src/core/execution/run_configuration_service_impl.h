@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-#include "vanta/execution/run_configuration.h"
+#include "mornox/execution/run_configuration.h"
 
-namespace vanta::internal {
+namespace mornox::internal {
 
 class RunConfigurationServiceImpl final : public RunConfigurationService {
 public:

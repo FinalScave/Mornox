@@ -1,8 +1,8 @@
-#include "vanta/plugin/plugin_protocol.h"
+#include "mornox/plugin/plugin_protocol.h"
 
-#include "vanta/core/json_codec.h"
+#include "mornox/core/json_codec.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 Value ParseJsonText(const std::string& text) {

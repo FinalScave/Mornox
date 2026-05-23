@@ -1,6 +1,6 @@
-# Vanta C++ Coding Style
+# Mornox C++ Coding Style
 
-Vanta uses a C++-oriented style that keeps platform APIs readable while keeping
+Mornox uses a C++-oriented style that keeps platform APIs readable while keeping
 data names close to standard C++ conventions.
 
 ## Naming
@@ -12,10 +12,10 @@ data names close to standard C++ conventions.
 - Constants use `kPascalCase`.
 - Enum class values use `kPascalCase`.
 - Filenames use `snake_case.h` and `snake_case.cpp`.
-- Vanta-owned JSON, plugin RPC, manifests, persisted state, and schema fields
+- Mornox-owned JSON, plugin RPC, manifests, persisted state, and schema fields
   use `lowerCamel`.
 - Setting ids, command ids, capability ids, and kind strings use dotted
-  `lowerCamel` when Vanta owns the schema.
+  `lowerCamel` when Mornox owns the schema.
 
 Examples:
 
@@ -36,7 +36,7 @@ struct ProjectViewNode {
 };
 
 namespace ProjectViewNodeKind {
-inline constexpr std::string_view kDirectory = "vanta.directory";
+inline constexpr std::string_view kDirectory = "mornox.directory";
 }
 ```
 

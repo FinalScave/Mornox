@@ -1,0 +1,13 @@
+{
+  "id": "mornox.languages",
+  "name": "Core Languages",
+  "version": "0.1.0",
+  "publisher": "Mornox",
+  "runtime": {
+    "kind": "core",
+    "entry": "builtin:languages"
+  },
+  "activationEvents": [
+    "onStartup"
+  ]
+}

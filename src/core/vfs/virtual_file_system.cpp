@@ -1,10 +1,10 @@
-#include "vanta/vfs/virtual_file_system.h"
+#include "mornox/vfs/virtual_file_system.h"
 
 #include <algorithm>
 #include <fstream>
 #include <sstream>
 
-namespace vanta {
+namespace mornox {
 
 VirtualFileSystem::VirtualFileSystem() {
     providers_["file"] = std::make_unique<LocalFileSystemProvider>();

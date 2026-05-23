@@ -1,6 +1,6 @@
 # Settings
 
-Vanta settings are UI-independent. The platform stores typed values, setting definitions, organization nodes, and scope resolution rules. UI code can render these concepts as a tree, tabs, search-first pages, or any other presentation.
+Mornox settings are UI-independent. The platform stores typed values, setting definitions, organization nodes, and scope resolution rules. UI code can render these concepts as a tree, tabs, search-first pages, or any other presentation.
 
 ## Concepts
 

@@ -1,6 +1,6 @@
-#include "vanta/workspace/access_control.h"
+#include "mornox/workspace/access_control.h"
 
-namespace vanta {
+namespace mornox {
 
 std::string ToString(AccessKind kind) {
     switch (kind) {

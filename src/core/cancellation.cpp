@@ -1,8 +1,8 @@
-#include "vanta/core/cancellation.h"
+#include "mornox/core/cancellation.h"
 
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 
 CancellationToken::CancellationToken()
     : cancelled_(std::make_shared<std::atomic_bool>(false)) {}

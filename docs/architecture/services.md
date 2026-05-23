@@ -1,6 +1,6 @@
-# Vanta Service Boundaries
+# Mornox Service Boundaries
 
-Vanta services are grouped by the API surface they belong to. New APIs should
+Mornox services are grouped by the API surface they belong to. New APIs should
 declare their intended layer before being exposed to plugins or UI clients.
 
 The guiding rule is that `WorkspaceContext` is the public IDE capability
@@ -71,12 +71,12 @@ integrations are implementations or providers.
 
 - `LanguageRegistry` resolves language definitions and services for files with
   optional project context.
-- `LanguageService` is Vanta's language-service contract for completion, hover,
+- `LanguageService` is Mornox's language-service contract for completion, hover,
   definition, semantic tokens, and document lifecycle events.
 - `CodeIntelligenceService` owns completion, inline completion, and routed
   language queries. It internally uses the language request pipeline.
-- `LspLanguageService` adapts an LSP client to Vanta's `LanguageService` API.
-- clice or other compiler-index integrations should feed Vanta services rather
+- `LspLanguageService` adapts an LSP client to Mornox's `LanguageService` API.
+- clice or other compiler-index integrations should feed Mornox services rather
   than becoming the public API themselves.
 
 ## Build, Execution, Run, And Jobs
@@ -131,7 +131,7 @@ IDE service.
 - Plugin APIs should depend on service interfaces such as `BuildService`,
   `LanguageRegistry`, `CommandRegistry`, `RunConfigurationService`, and
   `GitService`.
-- Default implementations live in `vanta::internal` and are owned by
+- Default implementations live in `mornox::internal` and are owned by
   `WorkspaceRuntime`.
 - In-process built-in plugins may use C++ interfaces directly.
 - Third-party plugin ABI should use C handles or out-of-process RPC. Stable
@@ -146,7 +146,7 @@ IDE service.
 - Plugin manifests do not declare security permissions. Sensitive actions are
   mediated by `ApprovalService` and workspace trust at the operation boundary.
 - Process plugins return capability registration values during activation only
-  for capabilities that Vanta currently bridges into runtime services:
+  for capabilities that Mornox currently bridges into runtime services:
   commands, agent tools, build providers, model providers, debug providers, and
   language services.
 - Hot unload must explicitly release registrations tracked by plugin activation
@@ -174,7 +174,7 @@ Localization is a core registry with UI-owned locale selection.
 Built-ins can provide default implementations, but core services should not
 depend on one built-in implementation directly.
 
-- Built-in plugin packages live under `plugins/builtin/vanta.*` with their
+- Built-in plugin packages live under `plugins/builtin/mornox.*` with their
   manifests, resources, and implementation sources.
 - `src/core/plugin` contains plugin infrastructure only, such as lifecycle,
   manifests, capability registration, and process hosting.
@@ -192,7 +192,7 @@ depend on one built-in implementation directly.
 UI code should prefer stable query APIs and event streams rather than reaching
 into implementation details.
 
-`include/vanta/ide` is the public API surface for IDE/UI clients and in-process
+`include/mornox/ide` is the public API surface for IDE/UI clients and in-process
 UI extensions. `UiService` is an optional host service registered by the IDE and
 looked up through `WorkspaceContext`. UI providers register panels, actions, and
 settings pages with `RegistrationHandle`, matching core extension-point

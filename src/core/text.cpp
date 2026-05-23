@@ -1,8 +1,8 @@
-#include "vanta/core/text.h"
+#include "mornox/core/text.h"
 
 #include <algorithm>
 
-namespace vanta {
+namespace mornox {
 
 std::size_t OffsetForPosition(const std::string& text, TextPosition position) {
     std::size_t offset = 0;

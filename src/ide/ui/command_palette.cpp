@@ -5,7 +5,7 @@
 #include <sstream>
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 
 namespace {
 

@@ -1,8 +1,8 @@
-#include "vanta/agent/agent_tool_registry.h"
+#include "mornox/agent/agent_tool_registry.h"
 
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 
 RegistrationHandle AgentToolRegistry::RegisterTool(AgentToolDefinition definition) {
     if (definition.id.empty() || !definition.handler) {

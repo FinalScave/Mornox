@@ -1,9 +1,9 @@
-#include "vanta/core/value.h"
+#include "mornox/core/value.h"
 
 #include <stdexcept>
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 const Value& NullValue() {

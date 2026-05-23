@@ -2,9 +2,9 @@
 
 #include <filesystem>
 
-#include "vanta/workspace/git_service.h"
+#include "mornox/workspace/git_service.h"
 
-namespace vanta::internal {
+namespace mornox::internal {
 
 class GitServiceImpl final : public GitService {
 public:

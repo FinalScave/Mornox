@@ -1,6 +1,6 @@
-#include "vanta/workspace/ide_event.h"
+#include "mornox/workspace/ide_event.h"
 
-namespace vanta {
+namespace mornox {
 
 std::string ToString(IdeEventKind kind) {
     switch (kind) {

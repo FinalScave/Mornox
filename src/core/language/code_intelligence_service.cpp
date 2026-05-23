@@ -1,12 +1,12 @@
-#include "vanta/language/code_intelligence_service.h"
+#include "mornox/language/code_intelligence_service.h"
 
 #include <cstdint>
 #include <utility>
 
 #include "language/language_request_pipeline.h"
-#include "vanta/workspace/workspace_context.h"
+#include "mornox/workspace/workspace_context.h"
 
-namespace vanta {
+namespace mornox {
 
 struct CodeIntelligenceService::Impl {
     internal::LanguageRequestPipeline language_requests;

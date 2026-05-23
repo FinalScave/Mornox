@@ -1,4 +1,4 @@
-#include "vanta/workspace/settings_service.h"
+#include "mornox/workspace/settings_service.h"
 
 #include <algorithm>
 #include <cctype>
@@ -8,9 +8,9 @@
 #include <utility>
 #include <variant>
 
-#include "vanta/core/json_codec.h"
+#include "mornox/core/json_codec.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 std::string Lowercase(std::string value) {
@@ -599,19 +599,19 @@ void SettingsService::Publish(SettingChangeEvent event) {
 }
 
 void RegisterDefaultSettings(SettingsService& settings) {
-    settings.RegisterNode({.id = "editor", .owner_id = "vanta.core", .title = "Editor", .order = 10});
-    settings.RegisterNode({.id = "editor.behavior", .parent_id = "editor", .owner_id = "vanta.core", .title = "Behavior", .order = 10});
-    settings.RegisterNode({.id = "editor.font", .parent_id = "editor", .owner_id = "vanta.core", .title = "Font", .order = 20});
-    settings.RegisterNode({.id = "ai", .owner_id = "vanta.core", .title = "AI", .order = 20});
-    settings.RegisterNode({.id = "ai.agent", .parent_id = "ai", .owner_id = "vanta.core", .title = "Agent", .order = 10});
-    settings.RegisterNode({.id = "ai.inlineCompletion", .parent_id = "ai", .owner_id = "vanta.core", .title = "Inline Completion", .order = 20});
-    settings.RegisterNode({.id = "build", .owner_id = "vanta.core", .title = "Build", .order = 30});
-    settings.RegisterNode({.id = "execution", .owner_id = "vanta.core", .title = "Execution", .order = 40});
-    settings.RegisterNode({.id = "index", .owner_id = "vanta.core", .title = "Indexing", .order = 50});
+    settings.RegisterNode({.id = "editor", .owner_id = "mornox.core", .title = "Editor", .order = 10});
+    settings.RegisterNode({.id = "editor.behavior", .parent_id = "editor", .owner_id = "mornox.core", .title = "Behavior", .order = 10});
+    settings.RegisterNode({.id = "editor.font", .parent_id = "editor", .owner_id = "mornox.core", .title = "Font", .order = 20});
+    settings.RegisterNode({.id = "ai", .owner_id = "mornox.core", .title = "AI", .order = 20});
+    settings.RegisterNode({.id = "ai.agent", .parent_id = "ai", .owner_id = "mornox.core", .title = "Agent", .order = 10});
+    settings.RegisterNode({.id = "ai.inlineCompletion", .parent_id = "ai", .owner_id = "mornox.core", .title = "Inline Completion", .order = 20});
+    settings.RegisterNode({.id = "build", .owner_id = "mornox.core", .title = "Build", .order = 30});
+    settings.RegisterNode({.id = "execution", .owner_id = "mornox.core", .title = "Execution", .order = 40});
+    settings.RegisterNode({.id = "index", .owner_id = "mornox.core", .title = "Indexing", .order = 50});
 
     settings.RegisterSetting({
         .id = "editor.fontSize",
-        .owner_id = "vanta.core",
+        .owner_id = "mornox.core",
         .node_id = "editor.font",
         .title = "Font Size",
         .description = "Default editor font size.",
@@ -624,7 +624,7 @@ void RegisterDefaultSettings(SettingsService& settings) {
     });
     settings.RegisterSetting({
         .id = "editor.formatOnSave",
-        .owner_id = "vanta.core",
+        .owner_id = "mornox.core",
         .node_id = "editor.behavior",
         .title = "Format On Save",
         .description = "Format documents when they are saved.",
@@ -637,7 +637,7 @@ void RegisterDefaultSettings(SettingsService& settings) {
     });
     settings.RegisterSetting({
         .id = "ai.agent.model",
-        .owner_id = "vanta.core",
+        .owner_id = "mornox.core",
         .node_id = "ai.agent",
         .title = "Agent Model",
         .description = "Model used for agent coding tasks.",
@@ -650,7 +650,7 @@ void RegisterDefaultSettings(SettingsService& settings) {
     });
     settings.RegisterSetting({
         .id = "ai.inlineCompletion.enabled",
-        .owner_id = "vanta.core",
+        .owner_id = "mornox.core",
         .node_id = "ai.inlineCompletion",
         .title = "Inline Completion",
         .description = "Enable inline completion suggestions.",
@@ -663,7 +663,7 @@ void RegisterDefaultSettings(SettingsService& settings) {
     });
     settings.RegisterSetting({
         .id = "execution.defaultTarget",
-        .owner_id = "vanta.core",
+        .owner_id = "mornox.core",
         .node_id = "execution",
         .title = "Default Target",
         .description = "Default execution target id.",
@@ -676,7 +676,7 @@ void RegisterDefaultSettings(SettingsService& settings) {
     });
     settings.RegisterSetting({
         .id = "index.autoRefresh",
-        .owner_id = "vanta.core",
+        .owner_id = "mornox.core",
         .node_id = "index",
         .title = "Auto Refresh Index",
         .description = "Refresh indexes when workspace files change.",

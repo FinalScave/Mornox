@@ -1,6 +1,6 @@
-#include "vanta/core/diagnostic.h"
+#include "mornox/core/diagnostic.h"
 
-namespace vanta {
+namespace mornox {
 
 std::string ToString(DiagnosticSeverity severity) {
     switch (severity) {

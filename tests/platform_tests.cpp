@@ -1,9 +1,9 @@
 #include "test_support.h"
 
-namespace vanta::tests {
+namespace mornox::tests {
 
 void TestAsyncRuntime() {
-    vanta::AsyncRuntime runtime(1);
+    mornox::AsyncRuntime runtime(1);
     int value = 0;
     runtime.PostWorker([&] {
         runtime.PostMain([&] {
@@ -20,5 +20,5 @@ void TestAsyncRuntime() {
 }
 
 TEST_CASE("Async runtime", "[platform]") {
-    vanta::tests::TestAsyncRuntime();
+    mornox::tests::TestAsyncRuntime();
 }

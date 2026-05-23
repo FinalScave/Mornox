@@ -1,6 +1,6 @@
-#include "vanta/language/document_language_sync.h"
+#include "mornox/language/document_language_sync.h"
 
-namespace vanta {
+namespace mornox {
 
 DocumentLanguageSynchronizer::DocumentLanguageSynchronizer(DocumentService& documents, LanguageRegistry& languages)
     : documents_(documents), languages_(languages) {}

@@ -1,8 +1,8 @@
-#include "vanta/workspace/capability_service.h"
+#include "mornox/workspace/capability_service.h"
 
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 
 void CapabilityRegistry::Set(Capability capability) {
     if (capability.id.empty()) {

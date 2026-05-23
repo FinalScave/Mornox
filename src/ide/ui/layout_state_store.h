@@ -4,11 +4,11 @@
 #include <string>
 #include <vector>
 
-#include "vanta/core/value.h"
-#include "vanta/project/component.h"
-#include "vanta/vfs/uri.h"
+#include "mornox/core/value.h"
+#include "mornox/project/component.h"
+#include "mornox/vfs/uri.h"
 
-namespace vanta {
+namespace mornox {
 
 struct UiState;
 
@@ -26,7 +26,7 @@ struct LayoutState {
 
 class LayoutStateStore final : public Component {
 public:
-    static constexpr const char* kComponentId = "vanta.ui.layout";
+    static constexpr const char* kComponentId = "mornox.ui.layout";
 
     std::string Id() const override;
     void RestoreState(const Value& state) override;

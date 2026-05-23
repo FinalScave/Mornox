@@ -1,8 +1,8 @@
-#include "vanta/core/registration.h"
+#include "mornox/core/registration.h"
 
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 
 RegistrationHandle::RegistrationHandle(std::function<void()> unregister)
     : unregister_callback_(std::move(unregister)), registered_(true) {}

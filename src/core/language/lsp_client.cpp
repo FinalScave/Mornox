@@ -1,13 +1,13 @@
-#include "vanta/language/lsp_client.h"
+#include "mornox/language/lsp_client.h"
 
 #include <chrono>
 #include <sstream>
 #include <thread>
 #include <utility>
 
-#include "vanta/core/json_codec.h"
+#include "mornox/core/json_codec.h"
 
-namespace vanta {
+namespace mornox {
 
 bool LspClient::Start(const std::filesystem::path& server_path, const std::filesystem::path& workspace_root, std::string* error_message) {
     CommandSpec spec;

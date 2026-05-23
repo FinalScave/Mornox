@@ -2,9 +2,9 @@
 
 #include <utility>
 
-#include "vanta/platform/process.h"
+#include "mornox/platform/process.h"
 
-namespace vanta {
+namespace mornox {
 
 void internal::GitServiceImpl::SetWorkspaceRoot(std::filesystem::path workspace_root) {
     workspace_root_ = std::move(workspace_root);

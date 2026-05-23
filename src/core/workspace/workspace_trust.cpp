@@ -1,9 +1,9 @@
-#include "vanta/workspace/workspace_trust.h"
+#include "mornox/workspace/workspace_trust.h"
 
 #include <algorithm>
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 bool ContainsAccess(const std::vector<AccessKind>& access_list, AccessKind access) {

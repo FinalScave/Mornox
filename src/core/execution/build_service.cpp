@@ -10,11 +10,11 @@
 #include <thread>
 #include <utility>
 
-#include "vanta/execution/problem_matcher.h"
-#include "vanta/workspace/workspace_context.h"
-#include "vanta/workspace/workspace_runtime.h"
+#include "mornox/execution/problem_matcher.h"
+#include "mornox/workspace/workspace_context.h"
+#include "mornox/workspace/workspace_runtime.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 BuildStatus BuildStatusFromJob(const std::optional<JobRecord>& job) {

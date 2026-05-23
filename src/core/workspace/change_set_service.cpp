@@ -1,9 +1,9 @@
-#include "vanta/workspace/change_set_service.h"
+#include "mornox/workspace/change_set_service.h"
 
 #include <filesystem>
 #include <sstream>
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 std::vector<std::string> SplitLines(const std::string& text) {

@@ -1,10 +1,10 @@
-#include "vanta/language/refactoring_service.h"
+#include "mornox/language/refactoring_service.h"
 
 #include <utility>
 
-#include "vanta/workspace/workspace_context.h"
+#include "mornox/workspace/workspace_context.h"
 
-namespace vanta {
+namespace mornox {
 
 bool RefactoringProvider::Supports(RefactoringKind) const {
     return false;

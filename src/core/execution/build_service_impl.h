@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-#include "vanta/execution/build_service.h"
+#include "mornox/execution/build_service.h"
 
-namespace vanta::internal {
+namespace mornox::internal {
 
 class BuildServiceImpl final : public BuildService {
 public:

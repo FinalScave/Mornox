@@ -1,10 +1,10 @@
-#include "vanta/agent/model_service.h"
+#include "mornox/agent/model_service.h"
 
 #include <utility>
 
-#include "vanta/core/json_codec.h"
+#include "mornox/core/json_codec.h"
 
-namespace vanta {
+namespace mornox {
 
 RegistrationHandle ModelService::RegisterProvider(std::unique_ptr<ModelProvider> provider) {
     if (provider == nullptr || provider->Id().empty()) {

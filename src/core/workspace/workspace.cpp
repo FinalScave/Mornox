@@ -1,9 +1,9 @@
-#include "vanta/workspace/workspace.h"
+#include "mornox/workspace/workspace.h"
 
 #include <fstream>
 #include <sstream>
 
-namespace vanta {
+namespace mornox {
 
 void Workspace::BindFileSystem(const VirtualFileSystem& vfs) {
     vfs_ = &vfs;

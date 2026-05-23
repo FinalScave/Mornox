@@ -6,9 +6,9 @@
 #include <string>
 #include <vector>
 
-#include "vanta/workspace/command_registry.h"
+#include "mornox/workspace/command_registry.h"
 
-namespace vanta {
+namespace mornox {
 
 struct CommandPaletteItem {
     std::string id;

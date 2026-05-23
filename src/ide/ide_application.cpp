@@ -1,13 +1,13 @@
-#include "vanta/ide/ide_application.h"
+#include "mornox/ide/ide_application.h"
 
 #include <cassert>
 #include <utility>
 
 #include "ide/ui_service_impl.h"
-#include "vanta/platform/async_job_dispatcher.h"
-#include "vanta/workspace/workspace_runtime.h"
+#include "mornox/platform/async_job_dispatcher.h"
+#include "mornox/workspace/workspace_runtime.h"
 
-namespace vanta {
+namespace mornox {
 
 IdeApplication::IdeApplication()
     : ui_service_(std::make_unique<internal::UiServiceImpl>()) {

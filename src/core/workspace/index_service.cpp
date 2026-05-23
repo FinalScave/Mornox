@@ -1,4 +1,4 @@
-#include "vanta/workspace/index_service.h"
+#include "mornox/workspace/index_service.h"
 
 #include <algorithm>
 #include <cctype>
@@ -6,11 +6,11 @@
 #include <sstream>
 #include <utility>
 
-#include "vanta/core/json_codec.h"
-#include "vanta/workspace/workspace_context.h"
-#include "vanta/workspace/workspace_runtime.h"
+#include "mornox/core/json_codec.h"
+#include "mornox/workspace/workspace_context.h"
+#include "mornox/workspace/workspace_runtime.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 struct SearchIndexEntry {
@@ -21,7 +21,7 @@ struct SearchIndexEntry {
 
 bool ShouldSkipDirectory(const VirtualFile& file) {
     const std::string name = file.DisplayName();
-    return name == ".git" || name == ".vanta" || name == "build" || name == ".cache";
+    return name == ".git" || name == ".mornox" || name == "build" || name == ".cache";
 }
 
 bool IsDirectory(const VirtualFile& file) {
@@ -107,7 +107,7 @@ std::string TrimPreview(const std::string& line) {
 class SearchIndexProvider final : public IndexProvider {
 public:
     std::string Id() const override {
-        return "vanta.index.search";
+        return "mornox.index.search";
     }
 
     std::string Kind() const override {

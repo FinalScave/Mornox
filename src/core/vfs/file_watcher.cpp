@@ -1,4 +1,4 @@
-#include "vanta/vfs/file_watcher.h"
+#include "mornox/vfs/file_watcher.h"
 
 #include <atomic>
 #include <filesystem>
@@ -12,7 +12,7 @@
 #include <unistd.h>
 #endif
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 #if defined(__APPLE__)
@@ -123,7 +123,7 @@ private:
             return false;
         }
 
-        queue_ = dispatch_queue_create("dev.vanta.file-watcher", DISPATCH_QUEUE_SERIAL);
+        queue_ = dispatch_queue_create("dev.mornox.file-watcher", DISPATCH_QUEUE_SERIAL);
         FSEventStreamSetDispatchQueue(stream_, queue_);
         return true;
     }
@@ -190,7 +190,7 @@ public:
 
         callback_ = std::move(callback);
         root_path_ = *local_path;
-        queue_ = dispatch_queue_create("dev.vanta.directory-watcher", DISPATCH_QUEUE_SERIAL);
+        queue_ = dispatch_queue_create("dev.mornox.directory-watcher", DISPATCH_QUEUE_SERIAL);
         running_ = true;
         RegisterTree(root_path_);
 

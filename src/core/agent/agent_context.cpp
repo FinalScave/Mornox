@@ -1,16 +1,16 @@
-#include "vanta/agent/agent_context.h"
+#include "mornox/agent/agent_context.h"
 
 #include <sstream>
 
 #include "internal/projection.h"
-#include "vanta/workspace/workspace_context.h"
-#include "vanta/project/project.h"
-#include "vanta/workspace/diagnostic_service.h"
-#include "vanta/workspace/document_service.h"
-#include "vanta/workspace/git_service.h"
-#include "vanta/workspace/index_service.h"
+#include "mornox/workspace/workspace_context.h"
+#include "mornox/project/project.h"
+#include "mornox/workspace/diagnostic_service.h"
+#include "mornox/workspace/document_service.h"
+#include "mornox/workspace/git_service.h"
+#include "mornox/workspace/index_service.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 std::string DiagnosticExplanation(const Diagnostic& diagnostic) {
@@ -40,7 +40,7 @@ Value AttachmentsProjection(const ProjectModel& model) {
 class DocumentContextProvider final : public AgentContextProvider {
 public:
     std::string Id() const override {
-        return "vanta.context.documents";
+        return "mornox.context.documents";
     }
 
     std::vector<AgentContextItem> Collect(const AgentContextRequest& request, WorkspaceContext& context) const override {
@@ -82,7 +82,7 @@ private:
 class DiagnosticsContextProvider final : public AgentContextProvider {
 public:
     std::string Id() const override {
-        return "vanta.context.diagnostics";
+        return "mornox.context.diagnostics";
     }
 
     std::vector<AgentContextItem> Collect(const AgentContextRequest& request, WorkspaceContext& context) const override {
@@ -111,7 +111,7 @@ public:
 class ProjectModelContextProvider final : public AgentContextProvider {
 public:
     std::string Id() const override {
-        return "vanta.context.project";
+        return "mornox.context.project";
     }
 
     std::vector<AgentContextItem> Collect(const AgentContextRequest&, WorkspaceContext& context) const override {
@@ -135,7 +135,7 @@ public:
 class JobContextProvider final : public AgentContextProvider {
 public:
     std::string Id() const override {
-        return "vanta.context.jobs";
+        return "mornox.context.jobs";
     }
 
     std::vector<AgentContextItem> Collect(const AgentContextRequest&, WorkspaceContext& context) const override {
@@ -167,12 +167,12 @@ public:
 class SearchIndexContextProvider final : public AgentContextProvider {
 public:
     std::string Id() const override {
-        return "vanta.context.searchIndex";
+        return "mornox.context.searchIndex";
     }
 
     std::vector<AgentContextItem> Collect(const AgentContextRequest&, WorkspaceContext& context) const override {
         std::size_t entries = 0;
-        if (auto snapshot = context.Indexes().Snapshot("vanta.index.search")) {
+        if (auto snapshot = context.Indexes().Snapshot("mornox.index.search")) {
             entries = snapshot->item_count;
         }
         return {{
@@ -191,7 +191,7 @@ public:
 class GitDiffContextProvider final : public AgentContextProvider {
 public:
     std::string Id() const override {
-        return "vanta.context.gitDiff";
+        return "mornox.context.gitDiff";
     }
 
     std::vector<AgentContextItem> Collect(const AgentContextRequest&, WorkspaceContext& context) const override {

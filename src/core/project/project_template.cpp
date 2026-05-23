@@ -1,4 +1,4 @@
-#include "vanta/project/project_template.h"
+#include "mornox/project/project_template.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -6,10 +6,10 @@
 #include <system_error>
 #include <utility>
 
-#include "vanta/workspace/workspace_context.h"
-#include "vanta/workspace/workspace.h"
+#include "mornox/workspace/workspace_context.h"
+#include "mornox/workspace/workspace.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 std::string DefaultScratchName(const ScratchFileRequest& request) {
@@ -157,7 +157,7 @@ ProjectTemplateResult ProjectTemplateService::CreateProject(const std::string& t
 }
 
 ScratchFileResult ScratchFileService::CreateScratchFile(WorkspaceContext& context, ScratchFileRequest request) const {
-    const std::filesystem::path directory = context.CurrentWorkspace().Info().root_path / ".vanta" / "scratch";
+    const std::filesystem::path directory = context.CurrentWorkspace().Info().root_path / ".mornox" / "scratch";
     std::error_code error;
     std::filesystem::create_directories(directory, error);
     if (error) {

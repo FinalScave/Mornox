@@ -1,10 +1,10 @@
-#include "vanta/project/component.h"
+#include "mornox/project/component.h"
 
 #include <algorithm>
 
-#include "vanta/project/project.h"
+#include "mornox/project/project.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 bool ContainsString(const std::vector<std::string>& values, const std::string& value) {

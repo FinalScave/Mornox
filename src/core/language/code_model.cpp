@@ -1,6 +1,6 @@
-#include "vanta/language/code_model.h"
+#include "mornox/language/code_model.h"
 
-namespace vanta {
+namespace mornox {
 
 std::string ToString(SymbolKind kind) {
     switch (kind) {

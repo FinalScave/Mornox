@@ -3,9 +3,9 @@
 #include <algorithm>
 #include <utility>
 
-#include "vanta/project/project.h"
+#include "mornox/project/project.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 bool ContainsString(const std::vector<std::string>& values, const std::string& value) {

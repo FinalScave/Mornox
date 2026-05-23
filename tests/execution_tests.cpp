@@ -2,31 +2,31 @@
 
 #include "execution/build_service_impl.h"
 
-namespace vanta::tests {
+namespace mornox::tests {
 
 void TestJobService() {
-    vanta::JobService jobs(vanta::InlineJobDispatcher());
-    const vanta::JobId id = jobs.Start(vanta::JobKind::Agent, "Agent job");
+    mornox::JobService jobs(mornox::InlineJobDispatcher());
+    const mornox::JobId id = jobs.Start(mornox::JobKind::Agent, "Agent job");
     jobs.AppendOutput(id, "hello");
     jobs.Complete(id, true);
     const auto job = jobs.Job(id);
     REQUIRE(job.has_value());
-    REQUIRE(job->status == vanta::JobStatus::Succeeded);
+    REQUIRE(job->status == mornox::JobStatus::Succeeded);
     REQUIRE(job->output == "hello");
 
-    const vanta::JobHandle handle = jobs.Submit({
-        .kind = vanta::JobKind::Plugin,
+    const mornox::JobHandle handle = jobs.Submit({
+        .kind = mornox::JobKind::Plugin,
         .title = "Posted job",
         .cancellable = true,
-    }, [](vanta::JobContext& context) {
+    }, [](mornox::JobContext& context) {
         context.AppendOutput("posted");
         context.Report(0.5, "half");
-        return vanta::JobResult{.success = true, .message = "done"};
+        return mornox::JobResult{.success = true, .message = "done"};
     });
     REQUIRE(handle.Valid());
     for (int attempt = 0; attempt < 50; ++attempt) {
         const auto posted = jobs.Job(handle.Id());
-        if (posted && posted->status == vanta::JobStatus::Succeeded) {
+        if (posted && posted->status == mornox::JobStatus::Succeeded) {
             REQUIRE(posted->output.find("posted") != std::string::npos);
             return;
         }
@@ -36,8 +36,8 @@ void TestJobService() {
 }
 
 void TestJobTermination() {
-    vanta::JobService jobs(vanta::InlineJobDispatcher());
-    const vanta::JobId id = jobs.Start(vanta::JobKind::Generic, "Terminable job");
+    mornox::JobService jobs(mornox::InlineJobDispatcher());
+    const mornox::JobId id = jobs.Start(mornox::JobKind::Generic, "Terminable job");
     bool handler_called = false;
     jobs.SetCancelHandler(id, [&] {
         handler_called = true;
@@ -47,14 +47,14 @@ void TestJobTermination() {
     REQUIRE(handler_called);
     const auto record = jobs.Wait(id, std::chrono::milliseconds(1));
     REQUIRE(record.has_value());
-    REQUIRE(record->status == vanta::JobStatus::Cancelled);
+    REQUIRE(record->status == mornox::JobStatus::Cancelled);
     REQUIRE(record->message == "stop now");
 }
 
 void TestProcessRealtimeCallbacks() {
     int stdout_chunks = 0;
     int stderr_chunks = 0;
-    const vanta::CommandResult result = vanta::RunCommand({
+    const mornox::CommandResult result = mornox::RunCommand({
         .executable = "/bin/sh",
         .arguments = {"-c", "printf out; printf err >&2"},
     }, {
@@ -79,53 +79,53 @@ void TestProcessRealtimeCallbacks() {
 void TestBuildHandle() {
     const auto root = MakeTempRoot();
     WriteFile(root / "src" / "main.cpp", "int main() {\n  return ;\n}\n");
-    vanta::VirtualFileSystem vfs;
-    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
+    mornox::VirtualFileSystem vfs;
+    mornox::WorkspaceRuntime session(vfs, mornox::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
 
-    vanta::internal::BuildServiceImpl service;
+    mornox::internal::BuildServiceImpl service;
     service.RegisterProvider(std::make_unique<FakeBuildProvider>());
-    std::vector<vanta::ExecutionEvent> events;
-    vanta::BuildHandle handle = service.Start(session.Context(), {
-        .kind = vanta::BuildRequestKind::Build,
+    std::vector<mornox::ExecutionEvent> events;
+    mornox::BuildHandle handle = service.Start(session.Context(), {
+        .kind = mornox::BuildRequestKind::Build,
         .provider_id = "test.build",
         .job_id = 42,
-    }, [&](const vanta::ExecutionEvent& event) {
+    }, [&](const mornox::ExecutionEvent& event) {
         events.push_back(event);
     });
     REQUIRE(handle.Valid());
-    const vanta::BuildResult result = handle.Wait();
+    const mornox::BuildResult result = handle.Wait();
     REQUIRE(result.exit_code == 0);
     REQUIRE(result.output == "built\n");
-    REQUIRE(handle.Status() == vanta::BuildStatus::Succeeded);
+    REQUIRE(handle.Status() == mornox::BuildStatus::Succeeded);
     REQUIRE(events.size() == 3);
     REQUIRE(handle.EventsValue().size() == 3);
 
     session.Context().Build().RegisterProvider(std::make_unique<FakeBuildProvider>());
-    const vanta::JobId job_id = session.Context().Jobs().Start(vanta::JobKind::Build, "Tracked build");
-    vanta::BuildHandle tracked = session.Context().Build().Start(session.Context(), {
-        .kind = vanta::BuildRequestKind::Build,
+    const mornox::JobId job_id = session.Context().Jobs().Start(mornox::JobKind::Build, "Tracked build");
+    mornox::BuildHandle tracked = session.Context().Build().Start(session.Context(), {
+        .kind = mornox::BuildRequestKind::Build,
         .provider_id = "test.build",
         .job_id = job_id,
     });
     REQUIRE(tracked.Wait().exit_code == 0);
     const auto job = session.Context().Jobs().Job(job_id);
     REQUIRE(job.has_value());
-    REQUIRE(job->status == vanta::JobStatus::Succeeded);
+    REQUIRE(job->status == mornox::JobStatus::Succeeded);
     REQUIRE(job->output == "built\n");
 
     session.Context().Build().RegisterProvider(std::make_unique<DiagnosticBuildProvider>());
-    const vanta::BuildResult diagnostic_build = session.Context().Build().Run(session.Context(), {
-        .kind = vanta::BuildRequestKind::Build,
+    const mornox::BuildResult diagnostic_build = session.Context().Build().Run(session.Context(), {
+        .kind = mornox::BuildRequestKind::Build,
         .provider_id = "test.diagnostics",
         .build_directory_override = root / "build",
     });
     REQUIRE(diagnostic_build.diagnostics.size() == 1);
     REQUIRE(diagnostic_build.diagnostics[0].location.file.ToUri() == session.Context().CurrentWorkspace().File("src/main.cpp").ToUri());
 
-    const vanta::BuildResult diagnostic_test = session.Context().Build().Run(session.Context(), {
-        .kind = vanta::BuildRequestKind::Test,
+    const mornox::BuildResult diagnostic_test = session.Context().Build().Run(session.Context(), {
+        .kind = mornox::BuildRequestKind::Test,
         .provider_id = "test.diagnostics",
         .build_directory_override = root / "build",
     });
@@ -135,51 +135,51 @@ void TestBuildHandle() {
 
 void TestExecutionHandle() {
     const auto root = MakeTempRoot();
-    vanta::VirtualFileSystem vfs;
-    vanta::WorkspaceRuntime session(vfs, vanta::InlineJobDispatcher());
+    mornox::VirtualFileSystem vfs;
+    mornox::WorkspaceRuntime session(vfs, mornox::InlineJobDispatcher());
     std::string error;
     REQUIRE(session.Open(root, &error));
 
     const auto targets = session.Context().Execution().Targets(session.Context());
     REQUIRE(!targets.empty());
     int events = 0;
-    vanta::ExecutionHandle handle = session.Context().Execution().Start(session.Context(), {
+    mornox::ExecutionHandle handle = session.Context().Execution().Start(session.Context(), {
         .executable = "/bin/sh",
         .arguments = {"-c", "printf ok"},
         .working_directory = root,
-    }, targets.front(), [&](const vanta::ExecutionEvent&) {
+    }, targets.front(), [&](const mornox::ExecutionEvent&) {
         ++events;
     });
     REQUIRE(handle.Valid());
-    const vanta::ExecutionResult result = handle.Wait();
+    const mornox::ExecutionResult result = handle.Wait();
     REQUIRE(result.exit_code == 0);
     REQUIRE(result.output == "ok");
     REQUIRE(events >= 2);
-    REQUIRE(handle.Status() == vanta::ExecutionStatus::Succeeded);
+    REQUIRE(handle.Status() == mornox::ExecutionStatus::Succeeded);
 
-    const vanta::JobId job_id = session.Context().Jobs().Start(vanta::JobKind::Run, "Tracked run");
-    vanta::ExecutionHandle tracked = session.Context().Execution().Start(session.Context(), {
+    const mornox::JobId job_id = session.Context().Jobs().Start(mornox::JobKind::Run, "Tracked run");
+    mornox::ExecutionHandle tracked = session.Context().Execution().Start(session.Context(), {
         .executable = "/bin/sh",
         .arguments = {"-c", "printf tracked"},
         .working_directory = root,
         .job_id = job_id,
-    }, targets.front(), [&](const vanta::ExecutionEvent& event) {
-        vanta::ApplyExecutionEventToJob(session.Context().Jobs(), event);
+    }, targets.front(), [&](const mornox::ExecutionEvent& event) {
+        mornox::ApplyExecutionEventToJob(session.Context().Jobs(), event);
     });
     REQUIRE(tracked.Wait().exit_code == 0);
     const auto job = session.Context().Jobs().Job(job_id);
     REQUIRE(job.has_value());
-    REQUIRE(job->status == vanta::JobStatus::Succeeded);
+    REQUIRE(job->status == mornox::JobStatus::Succeeded);
     REQUIRE(job->output == "tracked");
 
-    const vanta::JobId cancel_job_id = session.Context().Jobs().Start(vanta::JobKind::Run, "Cancelable run");
-    vanta::ExecutionHandle tracked_cancel = session.Context().Execution().Start(session.Context(), {
+    const mornox::JobId cancel_job_id = session.Context().Jobs().Start(mornox::JobKind::Run, "Cancelable run");
+    mornox::ExecutionHandle tracked_cancel = session.Context().Execution().Start(session.Context(), {
         .executable = "/bin/sh",
         .arguments = {"-c", "sleep 1; printf late"},
         .working_directory = root,
         .job_id = cancel_job_id,
-    }, targets.front(), [&](const vanta::ExecutionEvent& event) {
-        vanta::ApplyExecutionEventToJob(session.Context().Jobs(), event);
+    }, targets.front(), [&](const mornox::ExecutionEvent& event) {
+        mornox::ApplyExecutionEventToJob(session.Context().Jobs(), event);
     });
     REQUIRE(tracked_cancel.Valid());
     session.Context().Jobs().SetCancelHandler(cancel_job_id, [tracked_cancel]() mutable {
@@ -187,13 +187,13 @@ void TestExecutionHandle() {
     });
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     REQUIRE(session.Context().Jobs().RequestCancel(cancel_job_id));
-    const vanta::ExecutionResult tracked_cancel_result = tracked_cancel.Wait();
+    const mornox::ExecutionResult tracked_cancel_result = tracked_cancel.Wait();
     REQUIRE(tracked_cancel_result.exit_code != 0);
     const auto cancelled_job = session.Context().Jobs().Job(cancel_job_id);
     REQUIRE(cancelled_job.has_value());
-    REQUIRE(cancelled_job->status == vanta::JobStatus::Cancelled);
+    REQUIRE(cancelled_job->status == mornox::JobStatus::Cancelled);
 
-    vanta::ExecutionHandle cancelled = session.Context().Execution().Start(session.Context(), {
+    mornox::ExecutionHandle cancelled = session.Context().Execution().Start(session.Context(), {
         .executable = "/bin/sh",
         .arguments = {"-c", "sleep 1; printf late"},
         .working_directory = root,
@@ -201,30 +201,30 @@ void TestExecutionHandle() {
     REQUIRE(cancelled.Valid());
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     cancelled.Cancel();
-    const vanta::ExecutionResult cancelled_result = cancelled.Wait();
+    const mornox::ExecutionResult cancelled_result = cancelled.Wait();
     REQUIRE(cancelled_result.exit_code != 0);
-    REQUIRE(cancelled.Status() == vanta::ExecutionStatus::Cancelled);
+    REQUIRE(cancelled.Status() == mornox::ExecutionStatus::Cancelled);
     session.Close();
 }
 
 }
 
 TEST_CASE("Job service", "[execution]") {
-    vanta::tests::TestJobService();
+    mornox::tests::TestJobService();
 }
 
 TEST_CASE("Job termination", "[execution]") {
-    vanta::tests::TestJobTermination();
+    mornox::tests::TestJobTermination();
 }
 
 TEST_CASE("Process realtime callbacks", "[execution]") {
-    vanta::tests::TestProcessRealtimeCallbacks();
+    mornox::tests::TestProcessRealtimeCallbacks();
 }
 
 TEST_CASE("Build handle", "[build][execution]") {
-    vanta::tests::TestBuildHandle();
+    mornox::tests::TestBuildHandle();
 }
 
 TEST_CASE("Execution handle", "[execution]") {
-    vanta::tests::TestExecutionHandle();
+    mornox::tests::TestExecutionHandle();
 }

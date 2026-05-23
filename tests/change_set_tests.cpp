@@ -1,10 +1,10 @@
 #include "test_support.h"
 
-namespace vanta::tests {
+namespace mornox::tests {
 
 void TestChangeSetDiff() {
-    vanta::VirtualFileSystem vfs;
-    const std::string diff = vanta::CreateUnifiedDiff(vfs.LocalFile("main.cpp"), "int main() { return 0; }\n", "int main() { return 1; }\n");
+    mornox::VirtualFileSystem vfs;
+    const std::string diff = mornox::CreateUnifiedDiff(vfs.LocalFile("main.cpp"), "int main() { return 0; }\n", "int main() { return 1; }\n");
     REQUIRE(diff.find("-int main() { return 0; }") != std::string::npos);
     REQUIRE(diff.find("+int main() { return 1; }") != std::string::npos);
 }
@@ -13,17 +13,17 @@ void TestChangeSetService() {
     const auto root = MakeTempRoot();
     WriteFile(root / "main.cpp", "int main() { return 0; }\n");
 
-    vanta::Workspace workspace;
-    vanta::VirtualFileSystem vfs;
+    mornox::Workspace workspace;
+    mornox::VirtualFileSystem vfs;
     workspace.BindFileSystem(vfs);
     std::string error;
     REQUIRE(workspace.Open(root, &error));
 
-    vanta::DocumentService documents;
-    const vanta::VirtualFile main_file = workspace.File("main.cpp");
+    mornox::DocumentService documents;
+    const mornox::VirtualFile main_file = workspace.File("main.cpp");
     documents.OpenDocument(main_file, &error);
 
-    vanta::ChangeSetService changes;
+    mornox::ChangeSetService changes;
     const auto change_set = changes.CreateFileReplacement(
         main_file,
         "test",
@@ -36,14 +36,14 @@ void TestChangeSetService() {
     REQUIRE(workspace.ReadTextFile("main.cpp")->find("return 1") != std::string::npos);
     auto applied = changes.Get(change_set.id);
     REQUIRE(applied.has_value());
-    REQUIRE(applied->status == vanta::ChangeSetStatus::Applied);
+    REQUIRE(applied->status == mornox::ChangeSetStatus::Applied);
     REQUIRE(!applied->undo_token.empty());
     REQUIRE(!applied->inverse_edit.operations.empty());
     REQUIRE(changes.UndoApplied(workspace, documents, change_set.id, {.save_after_apply = true}).ok);
     REQUIRE(workspace.ReadTextFile("main.cpp")->find("return 0") != std::string::npos);
     auto undone = changes.Get(change_set.id);
     REQUIRE(undone.has_value());
-    REQUIRE(undone->status == vanta::ChangeSetStatus::Undone);
+    REQUIRE(undone->status == mornox::ChangeSetStatus::Undone);
 }
 
 void TestStructuredWorkspaceEdits() {
@@ -51,16 +51,16 @@ void TestStructuredWorkspaceEdits() {
     WriteFile(root / "old.cpp", "int old_value = 1;\n");
     WriteFile(root / "delete.cpp", "int delete_me = 1;\n");
 
-    vanta::Workspace workspace;
-    vanta::VirtualFileSystem vfs;
+    mornox::Workspace workspace;
+    mornox::VirtualFileSystem vfs;
     workspace.BindFileSystem(vfs);
     std::string error;
     REQUIRE(workspace.Open(root, &error));
 
-    vanta::DocumentService documents;
-    vanta::ChangeSetService changes;
-    const vanta::VirtualFile created_file = workspace.File("created.cpp");
-    const vanta::ChangeSet create_set = changes.CreateFileCreation(
+    mornox::DocumentService documents;
+    mornox::ChangeSetService changes;
+    const mornox::VirtualFile created_file = workspace.File("created.cpp");
+    const mornox::ChangeSet create_set = changes.CreateFileCreation(
         created_file,
         "test",
         "Create file",
@@ -73,8 +73,8 @@ void TestStructuredWorkspaceEdits() {
     REQUIRE(changes.UndoApplied(workspace, documents, create_set.id).ok);
     REQUIRE(!created_file.Exists());
 
-    const vanta::VirtualFile deleted_file = workspace.File("delete.cpp");
-    const vanta::ChangeSet delete_set = changes.CreateFileDeletion(
+    const mornox::VirtualFile deleted_file = workspace.File("delete.cpp");
+    const mornox::ChangeSet delete_set = changes.CreateFileDeletion(
         deleted_file,
         "test",
         "Delete file",
@@ -85,9 +85,9 @@ void TestStructuredWorkspaceEdits() {
     REQUIRE(changes.UndoApplied(workspace, documents, delete_set.id).ok);
     REQUIRE(deleted_file.Exists());
 
-    const vanta::VirtualFile old_file = workspace.File("old.cpp");
-    const vanta::VirtualFile new_file = workspace.File("new.cpp");
-    const vanta::ChangeSet rename_set = changes.CreateFileRename(
+    const mornox::VirtualFile old_file = workspace.File("old.cpp");
+    const mornox::VirtualFile new_file = workspace.File("new.cpp");
+    const mornox::ChangeSet rename_set = changes.CreateFileRename(
         old_file,
         new_file,
         "test",
@@ -101,7 +101,7 @@ void TestStructuredWorkspaceEdits() {
     REQUIRE(old_file.Exists());
     REQUIRE(!new_file.Exists());
 
-    const vanta::ChangeSet conflict_set = changes.CreateFileCreation(
+    const mornox::ChangeSet conflict_set = changes.CreateFileCreation(
         old_file,
         "test",
         "Create conflicting file",
@@ -118,14 +118,14 @@ void TestStructuredWorkspaceEdits() {
 }
 
 TEST_CASE("Change set diff", "[changes]") {
-    vanta::tests::TestChangeSetDiff();
+    mornox::tests::TestChangeSetDiff();
 }
 
 TEST_CASE("Change set service", "[changes]") {
-    vanta::tests::TestChangeSetService();
+    mornox::tests::TestChangeSetService();
 }
 
 TEST_CASE("Structured workspace edits", "[changes]") {
-    vanta::tests::TestStructuredWorkspaceEdits();
+    mornox::tests::TestStructuredWorkspaceEdits();
 }
 

@@ -1,11 +1,11 @@
-#include "vanta/execution/job_service.h"
+#include "mornox/execution/job_service.h"
 
 #include <exception>
 #include <utility>
 
-#include "vanta/core/json_codec.h"
+#include "mornox/core/json_codec.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 bool IsTerminalStatus(JobStatus status) {

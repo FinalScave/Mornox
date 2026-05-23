@@ -1,4 +1,4 @@
-#include "vanta/workspace/workspace_runtime.h"
+#include "mornox/workspace/workspace_runtime.h"
 
 #include <chrono>
 #include <cstdint>
@@ -12,7 +12,7 @@
 #include "workspace/command_registry_impl.h"
 #include "workspace/git_service_impl.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 bool IsTerminalStatus(JobStatus status) {
@@ -123,9 +123,9 @@ bool WorkspaceRuntime::Open(const std::filesystem::path& workspace_path, std::st
         project_manager_.ClearSingleFile();
     }
 
-    workspace_settings_.Load({.kind = SettingScopeKind::Workspace, .qualifier = workspace_.Info().root_path.string()}, workspace_.Info().root_path / ".vanta" / "settings.json");
-    project_state_store_->Load(workspace_.Info().root_path / ".vanta" / "state.json", &project_state_);
-    plugin_storage_.SetRoot(workspace_.Info().root_path / ".vanta" / "plugin-storage");
+    workspace_settings_.Load({.kind = SettingScopeKind::Workspace, .qualifier = workspace_.Info().root_path.string()}, workspace_.Info().root_path / ".mornox" / "settings.json");
+    project_state_store_->Load(workspace_.Info().root_path / ".mornox" / "state.json", &project_state_);
+    plugin_storage_.SetRoot(workspace_.Info().root_path / ".mornox" / "plugin-storage");
     open_ = true;
     jobs_.Complete(open_job, true, "Workspace open completed");
     if (initialize) {
@@ -172,8 +172,8 @@ void WorkspaceRuntime::Close() {
     const VirtualFile root = workspace_.RootFile();
     project_manager_.CloseProject(project_);
     project_state_ = project_manager_.SaveProject(project_, project_state_);
-    workspace_settings_.Save({.kind = SettingScopeKind::Workspace, .qualifier = workspace_.Info().root_path.string()}, workspace_.Info().root_path / ".vanta" / "settings.json");
-    project_state_store_->Save(workspace_.Info().root_path / ".vanta" / "state.json", project_state_);
+    workspace_settings_.Save({.kind = SettingScopeKind::Workspace, .qualifier = workspace_.Info().root_path.string()}, workspace_.Info().root_path / ".mornox" / "settings.json");
+    project_state_store_->Save(workspace_.Info().root_path / ".mornox" / "state.json", project_state_);
     open_ = false;
     initialized_ = false;
     Publish({
@@ -512,7 +512,7 @@ void WorkspaceRuntime::UpdateCoreCapabilities() {
     capabilities_.Set({
         .id = "workspace.open",
         .title = "Workspace Open",
-        .provider_id = "vanta.core",
+        .provider_id = "mornox.core",
         .status = open_ ? CapabilityStatus::Available : CapabilityStatus::Unavailable,
         .message = open_ ? "Workspace is open" : "Workspace is closed",
         .details = {{"root", workspace_.Info().root_path.string()}},
@@ -520,7 +520,7 @@ void WorkspaceRuntime::UpdateCoreCapabilities() {
     capabilities_.Set({
         .id = "project.model",
         .title = "Project Model",
-        .provider_id = "vanta.core",
+        .provider_id = "mornox.core",
         .status = project_.Model().facets.empty() && project_.Model().attachments.empty() ? CapabilityStatus::Degraded : CapabilityStatus::Available,
         .message = project_.Model().facets.empty() && project_.Model().attachments.empty() ? "Generic project model is available" : "Project model has facets or attachments",
         .details = {
@@ -531,7 +531,7 @@ void WorkspaceRuntime::UpdateCoreCapabilities() {
     capabilities_.Set({
         .id = "index.workspace",
         .title = "Workspace Index",
-        .provider_id = "vanta.core",
+        .provider_id = "mornox.core",
         .status = indexes_.Snapshots().empty() ? CapabilityStatus::Unavailable : CapabilityStatus::Available,
         .message = indexes_.Snapshots().empty() ? "No index snapshots are available" : "Index snapshots are Ready",
         .details = {{"snapshots", std::to_string(indexes_.Snapshots().size())}},
@@ -539,7 +539,7 @@ void WorkspaceRuntime::UpdateCoreCapabilities() {
     capabilities_.Set({
         .id = "language.registry",
         .title = "Language Registry",
-        .provider_id = "vanta.core",
+        .provider_id = "mornox.core",
         .status = CapabilityStatus::Available,
         .message = "Language registry is available",
         .details = {{"languageIds", JoinStrings(languages_->LanguageIds())}},
@@ -547,7 +547,7 @@ void WorkspaceRuntime::UpdateCoreCapabilities() {
     capabilities_.Set({
         .id = "build.providers",
         .title = "Build Providers",
-        .provider_id = "vanta.core",
+        .provider_id = "mornox.core",
         .status = build_->BuildProviderIds().empty() ? CapabilityStatus::Degraded : CapabilityStatus::Available,
         .message = build_->BuildProviderIds().empty() ? "No build provider is registered" : "Build providers are registered",
         .details = {{"providerIds", JoinStrings(build_->BuildProviderIds())}},
@@ -555,7 +555,7 @@ void WorkspaceRuntime::UpdateCoreCapabilities() {
     capabilities_.Set({
         .id = "agent.operations",
         .title = "Agent Operations",
-        .provider_id = "vanta.core",
+        .provider_id = "mornox.core",
         .status = CapabilityStatus::Available,
         .message = "Agent operation protocol is available",
         .details = {{"records", std::to_string(agent_operations_.Records().size())}},
@@ -599,7 +599,7 @@ void WorkspaceRuntime::ConnectEventRelays() {
                 UpdateCoreCapabilities();
                 Publish({
                     .kind = IdeEventKind::IndexChanged,
-                    .source = "vanta.index",
+                    .source = "mornox.index",
                 });
             });
         });

@@ -1,9 +1,9 @@
-#include "vanta/execution/execution_protocol.h"
+#include "mornox/execution/execution_protocol.h"
 
 #include <cstdint>
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 
 std::string ToString(ExecutionEventKind kind) {
     switch (kind) {

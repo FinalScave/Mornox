@@ -1,15 +1,15 @@
-#include "vanta/agent/agent_runtime.h"
+#include "mornox/agent/agent_runtime.h"
 
 #include <sstream>
 #include <utility>
 
 #include "internal/projection.h"
-#include "vanta/agent/agent_operation.h"
-#include "vanta/agent/agent_tool_registry.h"
-#include "vanta/core/json_codec.h"
-#include "vanta/workspace/workspace_context.h"
+#include "mornox/agent/agent_operation.h"
+#include "mornox/agent/agent_tool_registry.h"
+#include "mornox/core/json_codec.h"
+#include "mornox/workspace/workspace_context.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 bool ContainsTool(const std::vector<ModelToolDefinition>& tools, const std::string& id) {
@@ -102,7 +102,7 @@ JobResult AgentRuntime::RunSession(WorkspaceContext& context, const std::string&
     model_request.messages = {
         {
             .role = ModelMessageRole::System,
-            .content = "You are Vanta's coding agent. Use IDE operation tools for workspace reads, searches, builds, tests, and proposed edits.",
+            .content = "You are Mornox's coding agent. Use IDE operation tools for workspace reads, searches, builds, tests, and proposed edits.",
         },
         {
             .role = ModelMessageRole::User,

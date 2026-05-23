@@ -1,6 +1,6 @@
 # Agent-Native IDE Platform
 
-Vanta is an agent-native IDE platform. The goal is not to embed a chat agent
+Mornox is an agent-native IDE platform. The goal is not to embed a chat agent
 inside a C++ editor, but to expose structured IDE semantics to agents so they
 can reason about projects through the same core model that powers the UI.
 
@@ -12,7 +12,7 @@ it usually lacks the project semantics needed to act reliably.
 
 ## Product Position
 
-Vanta should be understood as:
+Mornox should be understood as:
 
 > An agent-native IDE platform where AI agents operate on structured IDE
 > semantics instead of raw files and shell output.
@@ -24,11 +24,11 @@ Git integrations.
 
 ## Core Principle
 
-Vanta Core is the source of truth. UI clients and agents are clients of the
+Mornox Core is the source of truth. UI clients and agents are clients of the
 same core state and command surface.
 
 ```text
-Vanta Core
+Mornox Core
   Workspace / Project / Document / Language / Index
   Build / Execution / Job / Debug / Git
   Agent / ChangeSet / Settings / Plugin lifecycle
@@ -49,7 +49,7 @@ Plugins
   UI and command extension points
 ```
 
-Agents should operate on Vanta Core, not on UI automation. The UI reacts to core
+Agents should operate on Mornox Core, not on UI automation. The UI reacts to core
 events and state projections. When an agent opens context, proposes edits, runs
 builds, or requests approval, it should do so through core APIs. The desktop UI
 then renders the relevant state.
@@ -57,7 +57,7 @@ then renders the relevant state.
 ## Architectural Rules
 
 - Core-first: capabilities that an agent, CLI, remote session, or CI job can use
-  belong in Vanta Core. UI code should render and dispatch, not own core IDE
+  belong in Mornox Core. UI code should render and dispatch, not own core IDE
   behavior.
 - Agent-visible semantics: project models, language resolution, indexes,
   diagnostics, build plans, execution targets, run configurations, jobs, debug
@@ -67,7 +67,7 @@ then renders the relevant state.
 - Provider-based platform: CMake, clice, C++, Python, Git, and future Android or
   Java support are providers or built-in plugins, not hard-coded assumptions in
   the workspace kernel.
-- Headless-ready: Vanta Core must run without a desktop UI. A headless process
+- Headless-ready: Mornox Core must run without a desktop UI. A headless process
   should be able to open a workspace, resolve project context, run indexing,
   execute builds, collect diagnostics, and produce change sets.
 - UI state isolation: agents may maintain their own session state without
@@ -92,12 +92,12 @@ with raw grep:
 - Which tests or run configurations are related to the changed files?
 - Which change set is pending approval, and what is its inverse operation?
 
-These questions should be answered through typed Vanta services and providers,
+These questions should be answered through typed Mornox services and providers,
 not by scraping UI state or guessing from shell output.
 
 ## Agent Efficiency And Reliability Directions
 
-Vanta should improve agents by moving them away from raw text exploration and
+Mornox should improve agents by moving them away from raw text exploration and
 toward direct operations on IDE-level project state. The following directions
 describe the capability surface that can make agents faster, safer, and more
 trustworthy.
@@ -129,7 +129,7 @@ whole repository or repeatedly searching for text.
 
 ### Context Retrieval
 
-Vanta should turn repository understanding into a reusable index rather than a
+Mornox should turn repository understanding into a reusable index rather than a
 per-agent discovery cost.
 
 - Maintain an incremental project knowledge graph across files, symbols,
@@ -190,7 +190,7 @@ patches.
 
 ### Testing And Verification
 
-Vanta should help agents select the cheapest verification path that still gives
+Mornox should help agents select the cheapest verification path that still gives
 confidence.
 
 - Select impacted tests from changed files, symbols, project targets, dependency
@@ -248,7 +248,7 @@ Generated code should be grounded in the current workspace model.
 
 ### Architecture Awareness
 
-Vanta should expose architectural boundaries so agents can avoid changes that
+Mornox should expose architectural boundaries so agents can avoid changes that
 fit locally but violate the system.
 
 - Identify module boundaries, layering rules, public and private APIs, feature
@@ -284,7 +284,7 @@ workspace state.
 
 ### Review And Documentation
 
-Vanta should turn review and documentation into structured follow-up on real
+Mornox should turn review and documentation into structured follow-up on real
 changes.
 
 - Review changed symbols, public APIs, migrations, tests, and generated metadata
@@ -380,10 +380,10 @@ The C++ integration should demonstrate the platform advantage over grep/LSP
 agents:
 
 - clice or another compiler-index provider should feed semantic index data into
-  Vanta's own services.
+  Mornox's own services.
 - CMake should contribute project model, build provider, build directory, target
   data, and compile database context.
-- Language service adapters should remain adapters. Vanta's `LanguageRegistry`
+- Language service adapters should remain adapters. Mornox's `LanguageRegistry`
   and `CodeIntelligenceService` are the platform API.
 - Build and test loops should report structured diagnostics into
   `DiagnosticService` and `JobService`.

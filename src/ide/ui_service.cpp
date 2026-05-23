@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace vanta::internal {
+namespace mornox::internal {
 namespace {
 
 template <typename Provider>

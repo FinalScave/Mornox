@@ -1,9 +1,9 @@
 #include "ui/layout_state_store.h"
 
-#include "vanta/core/value.h"
+#include "mornox/core/value.h"
 #include "ui/ui_state_store.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 bool BoolValue(const Value& object, const std::string& key, bool fallback) {

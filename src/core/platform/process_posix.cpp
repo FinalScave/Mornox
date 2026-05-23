@@ -1,4 +1,4 @@
-#include "vanta/platform/process.h"
+#include "mornox/platform/process.h"
 
 #include <array>
 #include <cerrno>
@@ -11,7 +11,7 @@
 #include <utility>
 #include <unistd.h>
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 std::vector<char*> BuildArgv(const CommandSpec& spec) {

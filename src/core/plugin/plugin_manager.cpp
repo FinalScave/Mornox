@@ -1,4 +1,4 @@
-#include "vanta/plugin/plugin_manager.h"
+#include "mornox/plugin/plugin_manager.h"
 
 #include <algorithm>
 #include <cctype>
@@ -11,15 +11,15 @@
 #include <utility>
 
 #include "internal/projection.h"
-#include "vanta/agent/model_service.h"
-#include "vanta/core/localization.h"
-#include "vanta/debug/debug_service.h"
-#include "vanta/project/project.h"
-#include "vanta/plugin/plugin_process_host.h"
-#include "vanta/core/json_codec.h"
-#include "vanta/workspace/workspace_runtime.h"
+#include "mornox/agent/model_service.h"
+#include "mornox/core/localization.h"
+#include "mornox/debug/debug_service.h"
+#include "mornox/project/project.h"
+#include "mornox/plugin/plugin_process_host.h"
+#include "mornox/core/json_codec.h"
+#include "mornox/workspace/workspace_runtime.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 std::string ReadFile(const std::filesystem::path& path) {
@@ -988,7 +988,7 @@ std::vector<PluginManifest> PluginManager::Scan(const std::filesystem::path& plu
     }
 
     for (const auto& entry : std::filesystem::recursive_directory_iterator(plugins_root)) {
-        if (!entry.is_regular_file() || entry.path().filename() != "vanta.plugin.json") {
+        if (!entry.is_regular_file() || entry.path().filename() != "mornox.plugin.json") {
             continue;
         }
         if (auto manifest = LoadManifest(entry.path())) {
@@ -1397,7 +1397,7 @@ bool PluginManager::ShouldActivate(const PluginManifest& manifest, WorkspaceCont
 
 std::string PluginManager::CompatibilityError(const PluginManifest& manifest) const {
     if (!manifest.min_api_version.empty() && CompareVersion(manifest.min_api_version, SupportedPluginApiVersion()) > 0) {
-        return "Plugin requires Vanta API " + manifest.min_api_version + ", but this runtime supports " + SupportedPluginApiVersion();
+        return "Plugin requires Mornox API " + manifest.min_api_version + ", but this runtime supports " + SupportedPluginApiVersion();
     }
     for (const std::string& capability : manifest.capabilities) {
         if (!SupportedPluginCapability(capability)) {

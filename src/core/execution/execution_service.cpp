@@ -1,4 +1,4 @@
-#include "vanta/execution/execution_service.h"
+#include "mornox/execution/execution_service.h"
 
 #include <atomic>
 #include <chrono>
@@ -8,11 +8,11 @@
 #include <thread>
 #include <utility>
 
-#include "vanta/execution/job_service.h"
-#include "vanta/platform/process.h"
-#include "vanta/workspace/workspace_context.h"
+#include "mornox/execution/job_service.h"
+#include "mornox/platform/process.h"
+#include "mornox/workspace/workspace_context.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 std::atomic_uint64_t next_execution_id = 1;
@@ -97,7 +97,7 @@ ExecutionHandle CompletedHandle(ExecutionResult result, ExecutionStatus status, 
 class LocalExecutionProvider final : public ExecutionProvider {
 public:
     std::string Id() const override {
-        return "vanta.localExecutor";
+        return "mornox.localExecutor";
     }
 
     std::vector<ExecutionTarget> Targets(WorkspaceContext& context) const override {

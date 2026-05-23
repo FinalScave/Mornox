@@ -1,14 +1,14 @@
-# Vanta
+# Mornox
 
-Vanta is an agent-native IDE platform.
+Mornox is an agent-native IDE platform.
 
 The goal is to expose structured IDE semantics to AI agents so they can operate
-on a workspace through Vanta Core instead of raw files, shell output, and UI
+on a workspace through Mornox Core instead of raw files, shell output, and UI
 automation.
 
 ```text
 AI agent / UI / CLI
-  -> Vanta Core
+  -> Mornox Core
   -> Workspace / Project / Document / Language / Index
   -> Build / Execution / Job / Debug / Git / Agent / ChangeSet
 ```
@@ -21,7 +21,7 @@ same provider and plugin model.
 
 ## At A Glance
 
-- Vanta Core is a headless IDE kernel shared by agents, UI clients, CLI
+- Mornox Core is a headless IDE kernel shared by agents, UI clients, CLI
   workflows, tests, remote sessions, and future CI workflows.
 - `WorkspaceContext` is the public capability surface for workspace, project,
   document, language, index, build, execution, jobs, debug, Git, settings,
@@ -60,30 +60,30 @@ used headlessly by agents, tests, CLI workflows, or future remote sessions.
 
 ```sh
 cmake -S . -B build
-cmake --build build --target vanta
+cmake --build build --target mornox
 ```
 
 CMake options:
 
-- `BUILD_VANTA_STATIC`: build static libraries, enabled by default.
-- `BUILD_VANTA_SHARED`: build shared libraries, disabled by default.
-- `BUILD_VANTA_TESTS`: build tests, enabled by default.
+- `BUILD_MORNOX_STATIC`: build static libraries, enabled by default.
+- `BUILD_MORNOX_SHARED`: build shared libraries, disabled by default.
+- `BUILD_MORNOX_TESTS`: build tests, enabled by default.
 
 CMake targets:
 
-- `vanta_core_static`: static headless IDE platform kernel.
-- `vanta_core_shared`: shared headless IDE platform kernel when
-  `BUILD_VANTA_SHARED` is enabled.
-- `vanta_core`: alias to the enabled core target used by in-tree targets.
-- `vanta_ide`: IDE/UI layer for the future Qt frontend.
-- `vanta_cli`: CLI debugging shell. The executable output is still named
-  `vanta`.
+- `mornox_core_static`: static headless IDE platform kernel.
+- `mornox_core_shared`: shared headless IDE platform kernel when
+  `BUILD_MORNOX_SHARED` is enabled.
+- `mornox_core`: alias to the enabled core target used by in-tree targets.
+- `mornox_ide`: IDE/UI layer for the future Qt frontend.
+- `mornox_cli`: CLI debugging shell. The executable output is still named
+  `mornox`.
 
 ## Tests
 
 ```sh
-cmake --build build --target vanta_tests
-./build/vanta_tests
+cmake --build build --target mornox_tests
+./build/mornox_tests
 ```
 
 ## Architecture Docs

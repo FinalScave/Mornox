@@ -1,11 +1,11 @@
-#include "vanta/plugin/core_plugin.h"
+#include "mornox/plugin/core_plugin.h"
 
 #include <algorithm>
 #include <utility>
 
 #include "core_plugin_factories.h"
 
-namespace vanta {
+namespace mornox {
 
 void CoreExtension::Deactivate() {}
 

@@ -1,8 +1,8 @@
-#include "vanta/workspace/approval_service.h"
+#include "mornox/workspace/approval_service.h"
 
-#include "vanta/workspace/workspace_trust.h"
+#include "mornox/workspace/workspace_trust.h"
 
-namespace vanta {
+namespace mornox {
 
 ApprovalService::ApprovalService(WorkspaceTrustService& trust)
     : trust_(trust) {

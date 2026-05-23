@@ -5,16 +5,16 @@
 #include <string>
 #include <vector>
 
-#include "vanta/core/event.h"
-#include "vanta/core/diagnostic.h"
-#include "vanta/execution/job_service.h"
-#include "vanta/project/project.h"
+#include "mornox/core/event.h"
+#include "mornox/core/diagnostic.h"
+#include "mornox/execution/job_service.h"
+#include "mornox/project/project.h"
 #include "ui/command_palette.h"
 #include "ui/editor.h"
-#include "vanta/workspace/ide_event.h"
-#include "vanta/workspace/workspace.h"
+#include "mornox/workspace/ide_event.h"
+#include "mornox/workspace/workspace.h"
 
-namespace vanta {
+namespace mornox {
 
 class WorkspaceContext;
 

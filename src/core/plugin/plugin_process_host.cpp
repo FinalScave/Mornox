@@ -1,4 +1,4 @@
-#include "vanta/plugin/plugin_process_host.h"
+#include "mornox/plugin/plugin_process_host.h"
 
 #include <chrono>
 #include <cstddef>
@@ -7,10 +7,10 @@
 #include <thread>
 #include <vector>
 
-#include "vanta/core/value.h"
-#include "vanta/core/json_codec.h"
+#include "mornox/core/value.h"
+#include "mornox/core/json_codec.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 std::optional<std::size_t> ContentLength(const std::string& headers) {

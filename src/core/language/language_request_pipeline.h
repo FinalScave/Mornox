@@ -7,10 +7,10 @@
 #include <string>
 #include <vector>
 
-#include "vanta/core/cancellation.h"
-#include "vanta/language/code_intelligence_service.h"
+#include "mornox/core/cancellation.h"
+#include "mornox/language/code_intelligence_service.h"
 
-namespace vanta::internal {
+namespace mornox::internal {
 
 enum class LanguageRequestKind {
     Completion,

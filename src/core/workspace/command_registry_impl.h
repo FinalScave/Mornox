@@ -3,9 +3,9 @@
 #include <map>
 #include <string>
 
-#include "vanta/workspace/command_registry.h"
+#include "mornox/workspace/command_registry.h"
 
-namespace vanta::internal {
+namespace mornox::internal {
 
 class CommandRegistryImpl final : public CommandRegistry {
 public:

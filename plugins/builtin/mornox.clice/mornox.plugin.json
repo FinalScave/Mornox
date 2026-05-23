@@ -1,0 +1,14 @@
+{
+  "id": "mornox.clice",
+  "name": "clice Language Intelligence",
+  "version": "0.1.0",
+  "publisher": "Mornox",
+  "runtime": {
+    "kind": "core",
+    "entry": "builtin:clice"
+  },
+  "activationEvents": [
+    "onLanguage:cpp",
+    "onWorkspaceContains:compile_commands.json"
+  ]
+}

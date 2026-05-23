@@ -1,14 +1,14 @@
 #include "test_support.h"
 
-namespace vanta::tests {
+namespace mornox::tests {
 
 void TestVirtualFileSystem() {
     const auto root = MakeTempRoot();
-    vanta::VirtualFileSystem vfs;
-    const vanta::VirtualFile file = vfs.LocalFile(root / "src" / "main.cpp");
-    vanta::VirtualFile copied = file;
+    mornox::VirtualFileSystem vfs;
+    const mornox::VirtualFile file = vfs.LocalFile(root / "src" / "main.cpp");
+    mornox::VirtualFile copied = file;
     REQUIRE(copied.ToUri() == file.ToUri());
-    const auto protected_provider = vfs.RegisterProvider("file", std::make_unique<vanta::LocalFileSystemProvider>());
+    const auto protected_provider = vfs.RegisterProvider("file", std::make_unique<mornox::LocalFileSystemProvider>());
     REQUIRE(!protected_provider.Registered());
     vfs.RemoveProvider("file");
 
@@ -20,12 +20,12 @@ void TestVirtualFileSystem() {
 
     const auto parent = file.Parent();
     REQUIRE(parent.has_value());
-    REQUIRE(parent->Stat().kind == vanta::VirtualFileKind::Directory);
+    REQUIRE(parent->Stat().kind == mornox::VirtualFileKind::Directory);
     REQUIRE(!parent->ListChildren().empty());
 }
 
 }
 
 TEST_CASE("Virtual file system", "[vfs]") {
-    vanta::tests::TestVirtualFileSystem();
+    mornox::tests::TestVirtualFileSystem();
 }

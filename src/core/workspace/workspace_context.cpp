@@ -1,11 +1,11 @@
-#include "vanta/workspace/workspace_context.h"
+#include "mornox/workspace/workspace_context.h"
 
 #include <utility>
 
-#include "vanta/workspace/workspace_runtime.h"
-#include "vanta/project/project.h"
+#include "mornox/workspace/workspace_runtime.h"
+#include "mornox/project/project.h"
 
-namespace vanta {
+namespace mornox {
 
 WorkspaceContext::WorkspaceContext(WorkspaceRuntime& runtime)
     : runtime_(&runtime), project_(&runtime.ProjectValue()) {

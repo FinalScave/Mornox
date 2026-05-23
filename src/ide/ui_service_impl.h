@@ -3,9 +3,9 @@
 #include <map>
 #include <string>
 
-#include "vanta/ide/ui_service.h"
+#include "mornox/ide/ui_service.h"
 
-namespace vanta::internal {
+namespace mornox::internal {
 
 class UiServiceImpl final : public UiService {
 public:

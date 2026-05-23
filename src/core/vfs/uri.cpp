@@ -1,6 +1,6 @@
-#include "vanta/vfs/uri.h"
+#include "mornox/vfs/uri.h"
 
-namespace vanta {
+namespace mornox {
 
 Uri::Uri(std::string value) : value_(std::move(value)) {}
 

@@ -1,0 +1,13 @@
+{
+  "id": "mornox.git",
+  "name": "Git Support",
+  "version": "0.1.0",
+  "publisher": "Mornox",
+  "runtime": {
+    "kind": "core",
+    "entry": "builtin:git"
+  },
+  "activationEvents": [
+    "onWorkspaceContains:.git"
+  ]
+}

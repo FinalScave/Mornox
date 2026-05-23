@@ -1,9 +1,9 @@
-#include "vanta/platform/async.h"
+#include "mornox/platform/async.h"
 
 #include <algorithm>
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 
 AsyncRuntime::AsyncRuntime(std::size_t worker_count) {
     Start(worker_count);

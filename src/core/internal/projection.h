@@ -3,15 +3,15 @@
 #include <string>
 #include <vector>
 
-#include "vanta/agent/agent_context.h"
-#include "vanta/agent/agent_operation.h"
-#include "vanta/core/value.h"
-#include "vanta/execution/execution_service.h"
-#include "vanta/execution/run_configuration.h"
-#include "vanta/language/code_intelligence_service.h"
-#include "vanta/language/language_service.h"
+#include "mornox/agent/agent_context.h"
+#include "mornox/agent/agent_operation.h"
+#include "mornox/core/value.h"
+#include "mornox/execution/execution_service.h"
+#include "mornox/execution/run_configuration.h"
+#include "mornox/language/code_intelligence_service.h"
+#include "mornox/language/language_service.h"
 
-namespace vanta::internal {
+namespace mornox::internal {
 
 Value AgentContextProjection(const AgentContext& context);
 Value AgentOperationEventProjection(const AgentOperationEvent& event);

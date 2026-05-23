@@ -1,0 +1,13 @@
+{
+  "id": "mornox.cmake",
+  "name": "CMake Support",
+  "version": "0.1.0",
+  "publisher": "Mornox",
+  "runtime": {
+    "kind": "core",
+    "entry": "builtin:cmake"
+  },
+  "activationEvents": [
+    "onWorkspaceContains:CMakeLists.txt"
+  ]
+}

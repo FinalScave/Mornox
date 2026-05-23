@@ -1,6 +1,6 @@
-#include "vanta/workspace/diagnostic_service.h"
+#include "mornox/workspace/diagnostic_service.h"
 
-namespace vanta {
+namespace mornox {
 
 void DiagnosticService::Publish(std::string source, std::vector<Diagnostic> diagnostics) {
     const std::string source_id = source;

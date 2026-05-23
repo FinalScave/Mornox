@@ -1,12 +1,12 @@
-#include "vanta/project/project.h"
+#include "mornox/project/project.h"
 
 #include <algorithm>
 #include <map>
 #include <utility>
 
-#include "vanta/workspace/workspace_context.h"
+#include "mornox/workspace/workspace_context.h"
 
-namespace vanta {
+namespace mornox {
 
 bool ProjectModel::HasFacet(const std::string& type) const {
     for (const ProjectFacet& facet : facets) {

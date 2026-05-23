@@ -3,9 +3,9 @@
 #include <filesystem>
 #include <string>
 
-#include "vanta/project/component.h"
+#include "mornox/project/component.h"
 
-namespace vanta {
+namespace mornox {
 
 class ProjectStateStore {
 public:

@@ -1,11 +1,11 @@
-#include "vanta/core/json_codec.h"
+#include "mornox/core/json_codec.h"
 
 #include <nlohmann/json.hpp>
 
 #include <exception>
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 nlohmann::json JsonFromValue(const Value& value) {

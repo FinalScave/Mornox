@@ -1,12 +1,12 @@
-#include "vanta/plugin/plugin_storage.h"
+#include "mornox/plugin/plugin_storage.h"
 
 #include <fstream>
 #include <sstream>
 #include <utility>
 
-#include "vanta/core/json_codec.h"
+#include "mornox/core/json_codec.h"
 
-namespace vanta {
+namespace mornox {
 
 PluginStorageService::PluginStorageService(std::filesystem::path root)
     : root_(std::move(root)) {}

@@ -1,16 +1,16 @@
 #include "ui/ui_state_store.h"
 
 #include "ui/layout_state_store.h"
-#include "vanta/project/project.h"
-#include "vanta/project/project_manager.h"
-#include "vanta/workspace/diagnostic_service.h"
-#include "vanta/workspace/document_service.h"
-#include "vanta/workspace/workspace_context.h"
+#include "mornox/project/project.h"
+#include "mornox/project/project_manager.h"
+#include "mornox/workspace/diagnostic_service.h"
+#include "mornox/workspace/document_service.h"
+#include "mornox/workspace/workspace_context.h"
 
 #include <memory>
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 UiState::ProjectState ProjectStateProjection(const ProjectModel& model) {

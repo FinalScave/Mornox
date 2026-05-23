@@ -5,9 +5,9 @@
 #include <type_traits>
 #include <variant>
 
-#include "vanta/core/diagnostic.h"
+#include "mornox/core/diagnostic.h"
 
-namespace vanta::internal {
+namespace mornox::internal {
 namespace {
 
 Value StringsProjection(const std::vector<std::string>& values) {

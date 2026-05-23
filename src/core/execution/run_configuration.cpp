@@ -12,11 +12,11 @@
 #include <utility>
 
 #include "internal/projection.h"
-#include "vanta/project/project.h"
-#include "vanta/workspace/workspace_context.h"
-#include "vanta/workspace/workspace_runtime.h"
+#include "mornox/project/project.h"
+#include "mornox/workspace/workspace_context.h"
+#include "mornox/workspace/workspace_runtime.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 ValidationResult Missing(const std::string& message) {
@@ -581,4 +581,4 @@ void RegisterDefaultRunConfigurations(RunConfigurationService& catalog) {
   catalog.RegisterProvider(std::make_unique<CustomCommandRunConfigurationProvider>());
 }
 
-} // namespace vanta
+} // namespace mornox

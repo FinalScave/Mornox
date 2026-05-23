@@ -1,10 +1,10 @@
-#include "vanta/language/lsp_language_service.h"
+#include "mornox/language/lsp_language_service.h"
 
 #include <utility>
 
-#include "vanta/core/json_codec.h"
+#include "mornox/core/json_codec.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 std::string LspUriForFile(const VirtualFile& file) {

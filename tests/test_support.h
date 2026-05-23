@@ -11,66 +11,66 @@
 #include <utility>
 #include <variant>
 
-#include "vanta/agent/agent_context.h"
-#include "vanta/agent/agent_operation.h"
-#include "vanta/agent/agent_runtime.h"
-#include "vanta/agent/model_service.h"
-#include "vanta/agent/agent_tool_registry.h"
+#include "mornox/agent/agent_context.h"
+#include "mornox/agent/agent_operation.h"
+#include "mornox/agent/agent_runtime.h"
+#include "mornox/agent/model_service.h"
+#include "mornox/agent/agent_tool_registry.h"
 #include "cpp_index.h"
-#include "vanta/debug/debug_service.h"
-#include "vanta/execution/build_service.h"
-#include "vanta/execution/problem_matcher.h"
-#include "vanta/workspace/change_set_service.h"
+#include "mornox/debug/debug_service.h"
+#include "mornox/execution/build_service.h"
+#include "mornox/execution/problem_matcher.h"
+#include "mornox/workspace/change_set_service.h"
 #include "cmake_project_model.h"
-#include "vanta/language/code_intelligence_service.h"
-#include "vanta/workspace/diagnostic_service.h"
-#include "vanta/workspace/document_service.h"
-#include "vanta/workspace/workspace.h"
-#include "vanta/language/document_language_sync.h"
-#include "vanta/workspace/workspace_runtime.h"
-#include "vanta/language/lsp_client.h"
-#include "vanta/plugin/core_plugin.h"
-#include "vanta/plugin/plugin_protocol.h"
-#include "vanta/plugin/plugin_manager.h"
-#include "vanta/platform/async.h"
-#include "vanta/platform/async_job_dispatcher.h"
-#include "vanta/platform/process.h"
-#include "vanta/core/json_codec.h"
-#include "vanta/core/result.h"
-#include "vanta/project/project.h"
+#include "mornox/language/code_intelligence_service.h"
+#include "mornox/workspace/diagnostic_service.h"
+#include "mornox/workspace/document_service.h"
+#include "mornox/workspace/workspace.h"
+#include "mornox/language/document_language_sync.h"
+#include "mornox/workspace/workspace_runtime.h"
+#include "mornox/language/lsp_client.h"
+#include "mornox/plugin/core_plugin.h"
+#include "mornox/plugin/plugin_protocol.h"
+#include "mornox/plugin/plugin_manager.h"
+#include "mornox/platform/async.h"
+#include "mornox/platform/async_job_dispatcher.h"
+#include "mornox/platform/process.h"
+#include "mornox/core/json_codec.h"
+#include "mornox/core/result.h"
+#include "mornox/project/project.h"
 #include "project/project_state_store.h"
-#include "vanta/workspace/approval_service.h"
+#include "mornox/workspace/approval_service.h"
 #include "ui/command_palette.h"
 #include "ui/layout_state_store.h"
 #include "ui/ui_state_store.h"
-#include "vanta/workspace/settings_service.h"
-#include "vanta/core/value.h"
-#include "vanta/vfs/virtual_file_system.h"
-#include "vanta/workspace/workspace_trust.h"
+#include "mornox/workspace/settings_service.h"
+#include "mornox/core/value.h"
+#include "mornox/vfs/virtual_file_system.h"
+#include "mornox/workspace/workspace_trust.h"
 
 
-namespace vanta::tests {
+namespace mornox::tests {
 
-inline void WaitForJobs(vanta::WorkspaceContext& context, vanta::JobKind kind) {
-    for (const vanta::JobRecord& job : context.Jobs().Jobs()) {
+inline void WaitForJobs(mornox::WorkspaceContext& context, mornox::JobKind kind) {
+    for (const mornox::JobRecord& job : context.Jobs().Jobs()) {
         if (job.kind == kind) {
             context.Jobs().Wait(job.id);
         }
     }
 }
 
-class FakeLanguageService final : public vanta::LanguageService {
+class FakeLanguageService final : public mornox::LanguageService {
 public:
     bool Start(std::string*) override { return true; }
     bool Running() const override { return true; }
     void Stop() override {}
 
-    void DidOpen(const vanta::TextDocument&) override { ++opened; }
-    void DidChange(const vanta::TextDocument&) override { ++changed; }
-    void DidSave(const vanta::TextDocument&) override { ++saved; }
-    void DidClose(const vanta::VirtualFile&) override { ++closed; }
+    void DidOpen(const mornox::TextDocument&) override { ++opened; }
+    void DidChange(const mornox::TextDocument&) override { ++changed; }
+    void DidSave(const mornox::TextDocument&) override { ++saved; }
+    void DidClose(const mornox::VirtualFile&) override { ++closed; }
 
-    vanta::CompletionList Completion(const vanta::TextDocumentPosition&) override {
+    mornox::CompletionList Completion(const mornox::TextDocumentPosition&) override {
         return {
             .ok = true,
             .items = {{
@@ -81,16 +81,16 @@ public:
             .trace = {.method = "completion"},
         };
     }
-    vanta::HoverResult Hover(const vanta::TextDocumentPosition&) override {
+    mornox::HoverResult Hover(const mornox::TextDocumentPosition&) override {
         return {.ok = true, .contents = "Fake hover", .trace = {.method = "hover"}};
     }
-    vanta::LocationResult Definition(const vanta::TextDocumentPosition&) override {
+    mornox::LocationResult Definition(const mornox::TextDocumentPosition&) override {
         return {.ok = true, .trace = {.method = "definition"}};
     }
-    vanta::SemanticTokens SemanticTokensFull(const vanta::TextDocumentIdentifier&) override {
+    mornox::SemanticTokens SemanticTokensFull(const mornox::TextDocumentIdentifier&) override {
         return {.ok = true, .trace = {.method = "semantic_tokens/full"}};
     }
-    vanta::ReferenceResult References(const vanta::ReferenceRequest& request) override {
+    mornox::ReferenceResult References(const mornox::ReferenceRequest& request) override {
         return {
             .ok = true,
             .references = {{
@@ -103,19 +103,19 @@ public:
                         .end = {.line = 0, .character = 8},
                     },
                 },
-                .kind = vanta::SymbolReferenceKind::Definition,
+                .kind = mornox::SymbolReferenceKind::Definition,
             }},
             .trace = {.method = "references"},
         };
     }
-    vanta::DocumentSymbolResult DocumentSymbols(const vanta::TextDocumentIdentifier& document) override {
+    mornox::DocumentSymbolResult DocumentSymbols(const mornox::TextDocumentIdentifier& document) override {
         return {
             .ok = true,
             .symbols = {{
                 .id = "main",
                 .name = "main",
                 .qualified_name = "main",
-                .kind = vanta::SymbolKind::Function,
+                .kind = mornox::SymbolKind::Function,
                 .location = {
                     .file = document.file,
                     .range = {
@@ -128,7 +128,7 @@ public:
             .trace = {.method = "document_symbols"},
         };
     }
-    vanta::RenamePrepareResult PrepareRename(const vanta::TextDocumentPosition&) override {
+    mornox::RenamePrepareResult PrepareRename(const mornox::TextDocumentPosition&) override {
         return {
             .ok = true,
             .range = {
@@ -146,7 +146,7 @@ public:
     int closed = 0;
 };
 
-inline vanta::Language FakeCppLanguage(vanta::LanguageService* service = nullptr, int priority = 0) {
+inline mornox::Language FakeCppLanguage(mornox::LanguageService* service = nullptr, int priority = 0) {
     return {
         .id = "cpp",
         .definition = {
@@ -160,13 +160,13 @@ inline vanta::Language FakeCppLanguage(vanta::LanguageService* service = nullptr
     };
 }
 
-class FakeBuildProvider final : public vanta::BuildProvider {
+class FakeBuildProvider final : public mornox::BuildProvider {
 public:
     std::string Id() const override {
         return "test.build";
     }
 
-    vanta::BuildEnvironment Detect(vanta::WorkspaceContext& context, const vanta::ProjectModel&) const override {
+    mornox::BuildEnvironment Detect(mornox::WorkspaceContext& context, const mornox::ProjectModel&) const override {
         return {
             .provider_id = Id(),
             .detected = true,
@@ -174,7 +174,7 @@ public:
         };
     }
 
-    vanta::BuildPlan Plan(vanta::WorkspaceContext& context, const vanta::BuildRequest&) const override {
+    mornox::BuildPlan Plan(mornox::WorkspaceContext& context, const mornox::BuildRequest&) const override {
         return {
             .provider_id = Id(),
             .title = "Fake build",
@@ -191,13 +191,13 @@ public:
     }
 };
 
-class DiagnosticBuildProvider final : public vanta::BuildProvider {
+class DiagnosticBuildProvider final : public mornox::BuildProvider {
 public:
     std::string Id() const override {
         return "test.diagnostics";
     }
 
-    vanta::BuildEnvironment Detect(vanta::WorkspaceContext& context, const vanta::ProjectModel&) const override {
+    mornox::BuildEnvironment Detect(mornox::WorkspaceContext& context, const mornox::ProjectModel&) const override {
         return {
             .provider_id = Id(),
             .detected = true,
@@ -205,7 +205,7 @@ public:
         };
     }
 
-    vanta::BuildPlan Plan(vanta::WorkspaceContext& context, const vanta::BuildRequest& request) const override {
+    mornox::BuildPlan Plan(mornox::WorkspaceContext& context, const mornox::BuildRequest& request) const override {
         return {
             .provider_id = Id(),
             .title = "Diagnostic build",
@@ -216,21 +216,21 @@ public:
                     .arguments = {"-c", "printf 'src/main.cpp:2:10: error: expected expression\\n'"},
                     .working_directory = context.CurrentWorkspace().Info().root_path,
                 },
-                .parse_diagnostics = request.kind == vanta::BuildRequestKind::Build,
+                .parse_diagnostics = request.kind == mornox::BuildRequestKind::Build,
                 .diagnostic_base_directory = request.build_directory_override,
             }},
         };
     }
 };
 
-class FakeInlineCompletionProvider final : public vanta::CodeCompletionProvider {
+class FakeInlineCompletionProvider final : public mornox::CodeCompletionProvider {
 public:
     std::string Id() const override {
         return "test.inline";
     }
 
-    vanta::CodeCompletionResult Complete(vanta::WorkspaceContext&, const vanta::CodeCompletionRequest& request) const override {
-        if (request.mode != vanta::CodeCompletionMode::Inline) {
+    mornox::CodeCompletionResult Complete(mornox::WorkspaceContext&, const mornox::CodeCompletionRequest& request) const override {
+        if (request.mode != mornox::CodeCompletionMode::Inline) {
             return {.mode = request.mode, .ok = true};
         }
         return {
@@ -246,13 +246,13 @@ public:
     }
 };
 
-class FakeModelProvider final : public vanta::ModelProvider {
+class FakeModelProvider final : public mornox::ModelProvider {
 public:
     std::string Id() const override {
         return "test.model";
     }
 
-    std::vector<vanta::ModelInfo> Models() const override {
+    std::vector<mornox::ModelInfo> Models() const override {
         return {{
             .id = "test-model",
             .provider_id = Id(),
@@ -261,10 +261,10 @@ public:
         }};
     }
 
-    vanta::ModelResponse Complete(const vanta::ModelRequest& request, vanta::ModelStreamCallback on_event = {}) const override {
+    mornox::ModelResponse Complete(const mornox::ModelRequest& request, mornox::ModelStreamCallback on_event = {}) const override {
         if (on_event) {
             on_event({
-                .kind = vanta::ModelStreamEventKind::Delta,
+                .kind = mornox::ModelStreamEventKind::Delta,
                 .text = "Planning",
             });
         }
@@ -273,18 +273,18 @@ public:
             .model_id = request.model_id.empty() ? "test-model" : request.model_id,
             .provider_id = Id(),
             .content = "Plan generated",
-            .payload = vanta::Value::ObjectValue({{"ok", vanta::Value(true)}}),
+            .payload = mornox::Value::ObjectValue({{"ok", mornox::Value(true)}}),
         };
     }
 };
 
-class ToolCallingModelProvider final : public vanta::ModelProvider {
+class ToolCallingModelProvider final : public mornox::ModelProvider {
 public:
     std::string Id() const override {
         return "test.tool-model";
     }
 
-    std::vector<vanta::ModelInfo> Models() const override {
+    std::vector<mornox::ModelInfo> Models() const override {
         return {{
             .id = "tool-model",
             .provider_id = Id(),
@@ -293,7 +293,7 @@ public:
         }};
     }
 
-    vanta::ModelResponse Complete(const vanta::ModelRequest& request, vanta::ModelStreamCallback = {}) const override {
+    mornox::ModelResponse Complete(const mornox::ModelRequest& request, mornox::ModelStreamCallback = {}) const override {
         return {
             .ok = true,
             .model_id = request.model_id,
@@ -301,15 +301,15 @@ public:
             .content = "Use tool",
             .tool_calls = {{
                 .id = "call-1",
-                .tool_id = "vanta.readFile",
-                .input = vanta::Value(vanta::Value::ObjectValue({{"file", vanta::Value("main.cpp")}})),
+                .tool_id = "mornox.readFile",
+                .input = mornox::Value(mornox::Value::ObjectValue({{"file", mornox::Value("main.cpp")}})),
             }},
-            .payload = vanta::Value::ObjectValue({{"tool", vanta::Value(true)}}),
+            .payload = mornox::Value::ObjectValue({{"tool", mornox::Value(true)}}),
         };
     }
 };
 
-class FakeDebugProvider final : public vanta::DebugProvider {
+class FakeDebugProvider final : public mornox::DebugProvider {
 public:
     std::string Id() const override {
         return "test.debug";
@@ -319,15 +319,15 @@ public:
         return {"native"};
     }
 
-    vanta::DebugSession Start(
-        vanta::WorkspaceContext&,
-        vanta::DebugSessionId session_id,
-        const vanta::DebugConfiguration& configuration,
-        vanta::DebugEventCallback on_event = {}) override {
+    mornox::DebugSession Start(
+        mornox::WorkspaceContext&,
+        mornox::DebugSessionId session_id,
+        const mornox::DebugConfiguration& configuration,
+        mornox::DebugEventCallback on_event = {}) override {
         if (on_event) {
             on_event({
                 .session_id = session_id,
-                .kind = vanta::DebugEventKind::Started,
+                .kind = mornox::DebugEventKind::Started,
                 .message = "Debug started",
             });
         }
@@ -335,24 +335,24 @@ public:
             .id = session_id,
             .provider_id = Id(),
             .configuration = configuration,
-            .status = vanta::DebugSessionStatus::Running,
+            .status = mornox::DebugSessionStatus::Running,
             .message = "Debug started",
         };
     }
 
-    bool Stop(vanta::DebugSessionId) override {
+    bool Stop(mornox::DebugSessionId) override {
         return true;
     }
 
-    bool ContinueSession(vanta::DebugSessionId) override {
+    bool ContinueSession(mornox::DebugSessionId) override {
         return true;
     }
 
-    bool Pause(vanta::DebugSessionId) override {
+    bool Pause(mornox::DebugSessionId) override {
         return true;
     }
 
-    vanta::DebugEvaluationResult Evaluate(vanta::DebugSessionId, const std::string& expression, std::uint64_t) override {
+    mornox::DebugEvaluationResult Evaluate(mornox::DebugSessionId, const std::string& expression, std::uint64_t) override {
         return {
             .ok = true,
             .value = expression,
@@ -360,14 +360,14 @@ public:
         };
     }
 
-    std::vector<vanta::StackFrame> StackTrace(vanta::DebugSessionId) const override {
+    std::vector<mornox::StackFrame> StackTrace(mornox::DebugSessionId) const override {
         return {{
             .id = 1,
             .name = "main",
         }};
     }
 
-    std::vector<vanta::DebugVariable> Variables(vanta::DebugSessionId, std::uint64_t) const override {
+    std::vector<mornox::DebugVariable> Variables(mornox::DebugSessionId, std::uint64_t) const override {
         return {{
             .name = "value",
             .value = "1",
@@ -389,7 +389,7 @@ struct ComponentTestStats {
     int saved_value = 0;
 };
 
-class TestComponent final : public vanta::Component {
+class TestComponent final : public mornox::Component {
 public:
     TestComponent(std::string id, ComponentTestStats& stats, bool throw_on_restore = false, bool throw_on_save = false)
         : id_(std::move(id)), stats_(stats), throw_on_restore_(throw_on_restore), throw_on_save_(throw_on_save) {}
@@ -398,14 +398,14 @@ public:
         return id_;
     }
 
-    void OnAttach(vanta::WorkspaceContext& context) override {
+    void OnAttach(mornox::WorkspaceContext& context) override {
         ++stats_.attached;
-        context.OnEvent(*this, vanta::IdeEventKind::ProjectChanged, [this](const vanta::IdeEvent&) {
+        context.OnEvent(*this, mornox::IdeEventKind::ProjectChanged, [this](const mornox::IdeEvent&) {
             ++stats_.events;
         });
     }
 
-    void RestoreState(const vanta::Value& state) override {
+    void RestoreState(const mornox::Value& state) override {
         ++stats_.restored;
         if (throw_on_restore_) {
             throw std::runtime_error("restore failed");
@@ -415,25 +415,25 @@ public:
         }
     }
 
-    void OnOpenProject(vanta::Project&) override {
+    void OnOpenProject(mornox::Project&) override {
         ++stats_.opened;
     }
 
-    void OnProjectChanged(vanta::Project&) override {
+    void OnProjectChanged(mornox::Project&) override {
         ++stats_.changed;
     }
 
-    vanta::Value SaveState() const override {
+    mornox::Value SaveState() const override {
         ++stats_.saved;
         if (throw_on_save_) {
             throw std::runtime_error("save failed");
         }
-        return vanta::Value::ObjectValue({
-            {"value", vanta::Value(static_cast<std::int64_t>(stats_.saved_value))},
+        return mornox::Value::ObjectValue({
+            {"value", mornox::Value(static_cast<std::int64_t>(stats_.saved_value))},
         });
     }
 
-    void OnCloseProject(vanta::Project&) override {
+    void OnCloseProject(mornox::Project&) override {
         ++stats_.closed;
     }
 
@@ -448,11 +448,11 @@ private:
     bool throw_on_save_ = false;
 };
 
-class RuntimeComponentExtension final : public vanta::CoreExtension {
+class RuntimeComponentExtension final : public mornox::CoreExtension {
 public:
     explicit RuntimeComponentExtension(ComponentTestStats& stats) : stats_(stats) {}
 
-    void Activate(vanta::ExtensionContext& context) override {
+    void Activate(mornox::ExtensionContext& context) override {
         context.Track(context.Context().Projects().RegisterComponentProvider({
             .id = "sample.runtime",
             .match = {.all_projects = true},
@@ -474,7 +474,7 @@ private:
 };
 
 inline std::filesystem::path MakeTempRoot() {
-    const auto root = std::filesystem::temp_directory_path() / "vanta-tests";
+    const auto root = std::filesystem::temp_directory_path() / "mornox-tests";
     std::filesystem::remove_all(root);
     std::filesystem::create_directories(root);
     return root;

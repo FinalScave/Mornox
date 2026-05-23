@@ -1,11 +1,11 @@
-#include "vanta/debug/debug_service.h"
+#include "mornox/debug/debug_service.h"
 
 #include <algorithm>
 #include <utility>
 
-#include "vanta/core/json_codec.h"
+#include "mornox/core/json_codec.h"
 
-namespace vanta {
+namespace mornox {
 
 RegistrationHandle DebugService::RegisterProvider(std::unique_ptr<DebugProvider> provider) {
     if (provider == nullptr || provider->Id().empty()) {

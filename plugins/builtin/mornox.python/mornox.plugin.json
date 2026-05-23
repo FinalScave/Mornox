@@ -1,0 +1,15 @@
+{
+  "id": "mornox.python",
+  "name": "Python Platform Support",
+  "version": "0.1.0",
+  "publisher": "Mornox",
+  "runtime": {
+    "kind": "core",
+    "entry": "builtin:python"
+  },
+  "activationEvents": [
+    "onLanguage:python",
+    "onWorkspaceContains:pyproject.toml",
+    "onWorkspaceContains:requirements.txt"
+  ]
+}

@@ -1,10 +1,10 @@
-#include "vanta/platform/async_job_dispatcher.h"
+#include "mornox/platform/async_job_dispatcher.h"
 
 #include <utility>
 
-#include "vanta/platform/async.h"
+#include "mornox/platform/async.h"
 
-namespace vanta {
+namespace mornox {
 
 JobDispatcher AsyncJobDispatcher(AsyncRuntime& runtime) {
     return {

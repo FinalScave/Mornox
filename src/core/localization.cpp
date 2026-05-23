@@ -1,10 +1,10 @@
-#include "vanta/core/localization.h"
+#include "mornox/core/localization.h"
 
 #include <fstream>
 #include <sstream>
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 std::string Trim(std::string value) {

@@ -1,8 +1,8 @@
-#include "vanta/vfs/virtual_file.h"
+#include "mornox/vfs/virtual_file.h"
 
-#include "vanta/vfs/virtual_file_system.h"
+#include "mornox/vfs/virtual_file_system.h"
 
-namespace vanta {
+namespace mornox {
 
 VirtualFile::VirtualFile(Uri uri, const VirtualFileSystem* vfs)
     : uri_(std::move(uri)), vfs_(vfs) {}

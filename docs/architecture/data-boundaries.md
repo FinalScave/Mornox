@@ -1,6 +1,6 @@
 # Data Boundaries
 
-Vanta uses three different data shapes for different architectural boundaries:
+Mornox uses three different data shapes for different architectural boundaries:
 typed C++ objects, `Value`, and JSON text. New APIs should choose one of these
 shapes deliberately instead of treating dynamic values as a default container.
 
@@ -8,7 +8,7 @@ shapes deliberately instead of treating dynamic values as a default container.
 
 Core platform APIs use typed C++ objects.
 
-`Value` is used when Vanta must preserve structured data whose schema belongs to
+`Value` is used when Mornox must preserve structured data whose schema belongs to
 a component, plugin, model provider, tool, or other extension owner.
 
 JSON text is used only at protocol and persistence boundaries where the wire or
@@ -20,7 +20,7 @@ semantic platform type.
 
 ## Typed Core Objects
 
-Use typed C++ structs, classes, enums, and virtual interfaces when Vanta owns the
+Use typed C++ structs, classes, enums, and virtual interfaces when Mornox owns the
 schema and behavior.
 
 Typed APIs should be the default for:
@@ -44,7 +44,7 @@ generic `Value` object just because it is persisted.
 
 ## Value Boundary
 
-Use `Value` when the data is structured, must be retained by Vanta, and its
+Use `Value` when the data is structured, must be retained by Mornox, and its
 schema is owned outside the core service reading or storing it.
 
 Good `Value` boundaries include:
@@ -60,7 +60,7 @@ Good `Value` boundaries include:
 - Provider-specific extra payload attached to model, agent, debug, or job
   events when the platform does not own the schema.
 
-Vanta-owned JSON schemas use `lowerCamel` keys. External protocols and file
+Mornox-owned JSON schemas use `lowerCamel` keys. External protocols and file
 formats keep their native field names at the adapter boundary.
 
 `Value` should be used directly at these boundaries. Avoid wrapping it in empty
@@ -73,12 +73,12 @@ stable domain concept, the data should be modeled as typed C++.
 ## JSON Text Boundary
 
 Use JSON text for process and protocol boundaries where the peer speaks JSON.
-The text is the protocol payload, not a Vanta object model.
+The text is the protocol payload, not a Mornox object model.
 
 Good JSON text boundaries include:
 
 - Out-of-process plugin RPC request and response payloads.
-- Raw protocol frames that Vanta intentionally passes through.
+- Raw protocol frames that Mornox intentionally passes through.
 - Future raw LSP frame pass-through APIs, if needed.
 
 For plugin RPC, `PluginRpcRequest::paramsJson` and
@@ -87,7 +87,7 @@ parse the JSON text into typed objects or `Value` at the edge.
 
 ## JSON Codec Boundary
 
-JSON text codecs parse and encode boundary payloads. Vanta uses nlohmann/json
+JSON text codecs parse and encode boundary payloads. Mornox uses nlohmann/json
 inside these codecs, adapters, tests, CLI formatting, and persistence
 implementations.
 
@@ -104,7 +104,7 @@ Public platform APIs should avoid exposing nlohmann/json unless the API is
 itself a JSON protocol adapter.
 Projection helpers that turn domain objects into `Value` should stay in private
 adapter code, such as `src/core/internal`, instead of being declared from
-`include/vanta` domain headers.
+`include/mornox` domain headers.
 
 ## Current Code Audit
 
@@ -115,7 +115,7 @@ The current code has converged on the main boundary decisions:
 - Plugin RPC uses JSON text through `paramsJson` and `resultJson`, which keeps
   cross-process wire data out of the core type system.
 - Settings use typed `SettingValue`, while JSON remains the store format.
-- `LanguageService` exposes Vanta language result types instead of raw LSP JSON.
+- `LanguageService` exposes Mornox language result types instead of raw LSP JSON.
 - `RunConfigurationData` is typed and cloneable. Serialization belongs to
   `RunConfigurationProvider`.
 - Job, model, agent, and debug extension payloads use direct optional `Value`

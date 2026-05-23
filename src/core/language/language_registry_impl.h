@@ -3,9 +3,9 @@
 #include <cstdint>
 #include <vector>
 
-#include "vanta/language/language_service.h"
+#include "mornox/language/language_service.h"
 
-namespace vanta::internal {
+namespace mornox::internal {
 
 class LanguageRegistryImpl final : public LanguageRegistry {
 public:

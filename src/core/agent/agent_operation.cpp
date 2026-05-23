@@ -1,4 +1,4 @@
-#include "vanta/agent/agent_operation.h"
+#include "mornox/agent/agent_operation.h"
 
 #include <cstdint>
 #include <exception>
@@ -9,21 +9,21 @@
 #include <utility>
 
 #include "internal/projection.h"
-#include "vanta/agent/agent_tool_registry.h"
-#include "vanta/execution/job_service.h"
-#include "vanta/workspace/approval_service.h"
-#include "vanta/workspace/capability_service.h"
-#include "vanta/workspace/workspace_context.h"
+#include "mornox/agent/agent_tool_registry.h"
+#include "mornox/execution/job_service.h"
+#include "mornox/workspace/approval_service.h"
+#include "mornox/workspace/capability_service.h"
+#include "mornox/workspace/workspace_context.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
-constexpr const char* kReadFileTool = "vanta.readFile";
-constexpr const char* kSearchFilesTool = "vanta.searchFiles";
-constexpr const char* kSearchTextTool = "vanta.searchText";
-constexpr const char* kProposeFileReplacementTool = "vanta.proposeFileReplacement";
-constexpr const char* kRunBuildTool = "vanta.runBuild";
-constexpr const char* kRunTestTool = "vanta.runTest";
+constexpr const char* kReadFileTool = "mornox.readFile";
+constexpr const char* kSearchFilesTool = "mornox.searchFiles";
+constexpr const char* kSearchTextTool = "mornox.searchText";
+constexpr const char* kProposeFileReplacementTool = "mornox.proposeFileReplacement";
+constexpr const char* kRunBuildTool = "mornox.runBuild";
+constexpr const char* kRunTestTool = "mornox.runTest";
 
 AgentOperationEvent CreateEvent(const AgentOperationRequest &request,
                                 AgentOperationStatus status,
@@ -265,7 +265,7 @@ AgentOperationService::Execute(WorkspaceContext &context,
           context.Capabilities().Set({
               .id = "agent.operations",
               .title = "Agent Operations",
-              .provider_id = "vanta.core",
+              .provider_id = "mornox.core",
               .status = CapabilityStatus::Available,
               .message = "Agent operation protocol is available",
               .details = {{"records", std::to_string(Records().size())}},
@@ -582,4 +582,4 @@ AgentOperationRequest AgentOperationRequestFromToolCall(WorkspaceContext &contex
   return operation;
 }
 
-} // namespace vanta
+} // namespace mornox

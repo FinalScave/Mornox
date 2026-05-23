@@ -1,21 +1,21 @@
-#include "vanta/project/project_manager.h"
+#include "mornox/project/project_manager.h"
 
 #include <algorithm>
 #include <set>
 #include <utility>
 
-#include "vanta/execution/run_configuration.h"
-#include "vanta/language/language_service.h"
-#include "vanta/project/project.h"
-#include "vanta/workspace/workspace.h"
-#include "vanta/workspace/workspace_context.h"
+#include "mornox/execution/run_configuration.h"
+#include "mornox/language/language_service.h"
+#include "mornox/project/project.h"
+#include "mornox/workspace/workspace.h"
+#include "mornox/workspace/workspace_context.h"
 
-namespace vanta {
+namespace mornox {
 namespace {
 
 bool ShouldSkipDirectory(const VirtualFile& file) {
     const std::string name = file.DisplayName();
-    return name == ".git" || name == ".vanta" || name == "build" || name == ".cache";
+    return name == ".git" || name == ".mornox" || name == "build" || name == ".cache";
 }
 
 bool IsDirectory(const VirtualFile& file) {
@@ -62,7 +62,7 @@ std::vector<VirtualFile> SortedVisibleChildren(const VirtualFile& directory) {
 class FilesProjectViewProvider final : public ProjectViewProvider {
 public:
     std::string Id() const override {
-        return "vanta.files.projectViewProvider";
+        return "mornox.files.projectViewProvider";
     }
 
     std::vector<ProjectView> Views(WorkspaceContext& context) const override {
@@ -70,7 +70,7 @@ public:
             return {};
         }
         return {{
-            .id = "vanta.files",
+            .id = "mornox.files",
             .title = "Files",
             .icon = "files",
             .priority = 0,

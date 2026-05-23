@@ -2,9 +2,9 @@
 
 #include <memory>
 
-#include "vanta/plugin/core_plugin.h"
+#include "mornox/plugin/core_plugin.h"
 
-namespace vanta::builtin {
+namespace mornox::builtin {
 
 std::unique_ptr<CoreExtension> CreateLanguagesCoreExtension();
 std::unique_ptr<CoreExtension> CreateCppCoreExtension();

@@ -5,9 +5,9 @@
 #include <string>
 #include <vector>
 
-#include "vanta/core/diagnostic.h"
+#include "mornox/core/diagnostic.h"
 
-namespace vanta {
+namespace mornox {
 
 struct EditorTab {
     std::uint64_t id = 0;

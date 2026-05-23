@@ -2,7 +2,7 @@
 
 #include <algorithm>
 
-namespace vanta {
+namespace mornox {
 
 const std::vector<EditorTab>& EditorWorkspace::Tabs() const {
     return tabs_;

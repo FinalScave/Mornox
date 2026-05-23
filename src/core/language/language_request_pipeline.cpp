@@ -3,7 +3,7 @@
 #include <type_traits>
 #include <utility>
 
-namespace vanta::internal {
+namespace mornox::internal {
 namespace {
 
 std::uint64_t CurrentDocumentVersion(const DocumentService& documents, const VirtualFile& file) {

@@ -1,8 +1,8 @@
-#include "vanta/workspace/document_service.h"
+#include "mornox/workspace/document_service.h"
 
 #include <algorithm>
 
-namespace vanta {
+namespace mornox {
 
 TextDocument* DocumentService::OpenDocument(const VirtualFile& file, std::string* error_message) {
     const Uri key = file.ToUri();

@@ -1,18 +1,18 @@
 # ABI Boundaries
 
-Vanta has three API surfaces. They must stay separate because they have different
+Mornox has three API surfaces. They must stay separate because they have different
 compatibility and lifetime rules.
 
 ## Layers
 
 ### Core C++ API
 
-The core C++ API is used by Vanta itself, built-in extensions, tests, and source
+The core C++ API is used by Mornox itself, built-in extensions, tests, and source
 compatible integrations that are compiled with the same toolchain expectations.
 It may use C++ types such as `std::vector`, `std::string`, `std::unique_ptr`,
 references, virtual classes, and templates.
 
-This layer is not a stable binary ABI. Public headers under `include/vanta`
+This layer is not a stable binary ABI. Public headers under `include/mornox`
 belong to this layer unless they explicitly use the native plugin ABI prefix.
 
 ### Native Plugin ABI
@@ -22,13 +22,13 @@ plugins. It must remain a C ABI.
 
 Rules:
 
-- Use opaque handles such as `VantaHost*`, `VantaPlugin*`, and `VantaHandle*`.
+- Use opaque handles such as `MornoxHost*`, `MornoxPlugin*`, and `MornoxHandle*`.
 - Use function tables with `abi_version` and `struct_size`.
-- Use `VantaStringView` for borrowed strings.
-- Use `VantaOwnedBytes` or explicit release callbacks for owned memory.
+- Use `MornoxStringView` for borrowed strings.
+- Use `MornoxOwnedBytes` or explicit release callbacks for owned memory.
 - Use `function pointer + user_data` instead of `std::function`.
 - Use output parameters such as `T** out_value` for created handles.
-- Return `VantaStatus` for errors.
+- Return `MornoxStatus` for errors.
 - Never expose C++ references, STL containers, smart pointers, exceptions, RTTI,
   virtual classes, or `Value`.
 
@@ -90,7 +90,7 @@ ownership.
 ### Native ABI Always Uses Pointers
 
 The native ABI must use pointers even for required values. Required pointers are
-validated at the function boundary and return `VANTA_STATUS_INVALID_ARGUMENT`
+validated at the function boundary and return `MORNOX_STATUS_INVALID_ARGUMENT`
 when null.
 
 ## Dependency Injection Policy
@@ -132,7 +132,7 @@ This keeps ownership and dependency flow visible.
 
 - Core C++ may use `std::optional`, `Result<T>`, and error strings where already
   established.
-- Native ABI returns `VantaStatus` and must not throw across the boundary.
+- Native ABI returns `MornoxStatus` and must not throw across the boundary.
 - Plugin RPC returns versioned response objects with explicit error fields.
 - Handles returned across a native ABI boundary must have an explicit release
   function.
@@ -147,7 +147,7 @@ This keeps ownership and dependency flow visible.
 - UI or host applications own the main-thread dispatcher.
 - Services should publish state changes through IDE events or service-specific
   event buses.
-- ABI callbacks must be treated as host calls. They cannot assume Vanta internal
+- ABI callbacks must be treated as host calls. They cannot assume Mornox internal
   locks, C++ exceptions, or UI thread availability.
 
 ## Current Audit Findings
@@ -174,8 +174,8 @@ classes.
 
 Expected shape:
 
-- `VantaHostApi` owns host functions.
-- `VantaPluginApi` owns plugin callbacks.
+- `MornoxHostApi` owns host functions.
+- `MornoxPluginApi` owns plugin callbacks.
 - Every ABI struct starts with `struct_size`.
 - Every function validates `abi_version` and required pointers.
 - Every returned handle has a matching release function.

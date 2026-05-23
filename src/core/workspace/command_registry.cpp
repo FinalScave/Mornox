@@ -2,7 +2,7 @@
 
 #include <utility>
 
-namespace vanta {
+namespace mornox {
 
 RegistrationHandle internal::CommandRegistryImpl::RegisterCommand(CommandDescriptor descriptor, CommandHandler handler) {
     if (descriptor.id.empty()) {
