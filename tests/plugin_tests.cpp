@@ -262,8 +262,8 @@ def read_request():
 
 def send_response(identifier, result):
     body = json.dumps({"jsonrpc": "2.0", "id": identifier, "result": result})
-    sys.stdout.write(f"Content-Length: {len(body)}\r\n\r\n{body}")
-    sys.stdout.flush()
+    sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n{body}".encode("utf-8"))
+    sys.stdout.buffer.flush()
 
 while True:
     request = read_request()
@@ -382,6 +382,79 @@ while True:
     session.Close();
 }
 
+void TestExternalPluginAcceptsLfOnlyHeaders() {
+    const auto root = MakeTempRoot();
+    const auto plugin_dir = root / "plugins" / "lf";
+    WriteFile(plugin_dir / "mornox.plugin.json", R"({
+      "id": "sample.lf",
+      "name": "LF Plugin",
+      "version": "0.1.0",
+      "publisher": "Mornox",
+      "runtime": {"kind": "process", "entry": "host.py"},
+      "capabilities": ["command"]
+    })");
+    WriteFile(plugin_dir / "host.py", R"PY(#!/usr/bin/env python3
+import json
+import sys
+
+def read_request():
+    headers = {}
+    while True:
+        line = sys.stdin.buffer.readline()
+        if not line:
+            return None
+        if line in (b"\r\n", b"\n"):
+            break
+        key, value = line.decode("utf-8").split(":", 1)
+        headers[key.lower()] = value.strip()
+    length = int(headers.get("content-length", "0"))
+    if length == 0:
+        return None
+    return json.loads(sys.stdin.buffer.read(length).decode("utf-8"))
+
+def send_response(identifier, result):
+    body = json.dumps({"jsonrpc": "2.0", "id": identifier, "result": result})
+    sys.stdout.buffer.write(f"Content-Length: {len(body)}\n\n{body}".encode("utf-8"))
+    sys.stdout.buffer.flush()
+
+while True:
+    request = read_request()
+    if request is None:
+        break
+    method = request.get("method")
+    params = request.get("params", {})
+    if method == "plugin.activate":
+        send_response(request["id"], {
+            "registrations": [{"kind": "command", "id": "lf.echo", "title": "LF Echo"}]
+        })
+    elif method == "command.execute":
+        send_response(request["id"], {"echo": params.get("arguments", {})})
+    elif method == "plugin.deactivate":
+        send_response(request["id"], {"ok": True})
+        break
+    else:
+        send_response(request["id"], {"ok": True})
+)PY");
+    std::filesystem::permissions(plugin_dir / "host.py", std::filesystem::perms::owner_exec, std::filesystem::perm_options::add);
+
+    mornox::VirtualFileSystem vfs;
+    mornox::WorkspaceRuntime session(vfs, mornox::InlineJobDispatcher());
+    std::string error;
+    REQUIRE(session.Open(root, &error));
+    mornox::ConsoleLogger logger;
+    mornox::PluginManager manager;
+    manager.Scan(root / "plugins");
+
+    const auto activate_messages = manager.ActivateExternalPlugins(logger, session.Context());
+    REQUIRE(activate_messages.size() == 1);
+    REQUIRE(manager.ActivePluginIds().size() == 1);
+    const auto command_result = session.Context().Commands().Execute("lf.echo", mornox::Value::ObjectValue({{"value", mornox::Value("ok")}}));
+    REQUIRE(command_result.has_value());
+    REQUIRE((*command_result)["echo"].StringValue("value").value_or("") == "ok");
+    manager.DeactivateAll();
+    session.Close();
+}
+
 void TestExternalPluginProcessHealth() {
     const auto root = MakeTempRoot();
     const auto plugin_dir = root / "plugins" / "crash";
@@ -417,8 +490,8 @@ if request is not None:
     body = json.dumps({"jsonrpc": "2.0", "id": request["id"], "result": {
         "registrations": [{"kind": "command", "id": "crash.command", "title": "Crash Command"}]
     }})
-    sys.stdout.write(f"Content-Length: {len(body)}\r\n\r\n{body}")
-    sys.stdout.flush()
+    sys.stdout.buffer.write(f"Content-Length: {len(body)}\r\n\r\n{body}".encode("utf-8"))
+    sys.stdout.buffer.flush()
 )PY");
     std::filesystem::permissions(plugin_dir / "host.py", std::filesystem::perms::owner_exec, std::filesystem::perm_options::add);
 
@@ -566,6 +639,10 @@ TEST_CASE("Core plugin activation", "[plugin]") {
 
 TEST_CASE("External plugin unload and reload", "[plugin]") {
     mornox::tests::TestExternalPluginUnloadAndReload();
+}
+
+TEST_CASE("External plugin accepts LF-only headers", "[plugin]") {
+    mornox::tests::TestExternalPluginAcceptsLfOnlyHeaders();
 }
 
 TEST_CASE("External plugin process Health", "[plugin]") {

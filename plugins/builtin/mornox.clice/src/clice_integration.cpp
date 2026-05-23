@@ -13,7 +13,7 @@ bool CliceIntegration::Configure(std::filesystem::path clice_path, std::filesyst
 }
 
 std::unique_ptr<LanguageService> CliceIntegration::CreateLanguageService() const {
-    return std::make_unique<LspLanguageService>(clice_path_, workspace_root_);
+    return std::make_unique<LspLanguageService>(clice_path_, workspace_root_, "cpp");
 }
 
 const std::filesystem::path& CliceIntegration::ClicePath() const {

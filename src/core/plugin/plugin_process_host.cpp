@@ -33,9 +33,6 @@ std::optional<std::size_t> HeaderEndOffset(const std::string& response) {
     if (const std::size_t value = response.find("\r\n\r\n"); value != std::string::npos) {
         return value + 4;
     }
-    if (const std::size_t value = response.find("\r\r\n\r\r\n"); value != std::string::npos) {
-        return value + 6;
-    }
     if (const std::size_t value = response.find("\n\n"); value != std::string::npos) {
         return value + 2;
     }

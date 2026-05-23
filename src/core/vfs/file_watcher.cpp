@@ -1,8 +1,11 @@
 #include "mornox/vfs/file_watcher.h"
 
+#include <array>
 #include <atomic>
 #include <filesystem>
 #include <mutex>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #if defined(__APPLE__)
@@ -10,6 +13,11 @@
 #include <dispatch/dispatch.h>
 #include <fcntl.h>
 #include <unistd.h>
+#elif defined(_WIN32)
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <windows.h>
 #endif
 
 namespace mornox {
@@ -361,6 +369,197 @@ private:
     FileWatcher* active_ = nullptr;
 };
 
+#elif defined(_WIN32)
+
+class WindowsFileWatcher final : public FileWatcher {
+public:
+    explicit WindowsFileWatcher(const VirtualFileSystem& vfs) : vfs_(vfs) {}
+
+    ~WindowsFileWatcher() override {
+        Stop();
+    }
+
+    bool Start(const VirtualFile& root, FileWatchCallback callback, std::string* error_message) override {
+        auto local_path = root.LocalPath();
+        if (!local_path) {
+            if (error_message != nullptr) {
+                *error_message = "File watcher requires a local root";
+            }
+            return false;
+        }
+        if (running_.load()) {
+            return true;
+        }
+
+        callback_ = std::move(callback);
+        root_path_ = *local_path;
+        const std::wstring root_path = root_path_.wstring();
+        HANDLE directory = CreateFileW(
+            root_path.c_str(),
+            FILE_LIST_DIRECTORY,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            nullptr,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+            nullptr);
+        if (directory == INVALID_HANDLE_VALUE) {
+            if (error_message != nullptr) {
+                *error_message = "Failed to open directory for file watching";
+            }
+            return false;
+        }
+
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            directory_ = directory;
+        }
+        running_ = true;
+        worker_ = std::thread([this] {
+            WatchLoop();
+        });
+        return true;
+    }
+
+    void Stop() override {
+        if (!running_.exchange(false) && !worker_.joinable()) {
+            return;
+        }
+
+        HANDLE directory = DirectoryHandle();
+        if (directory != INVALID_HANDLE_VALUE) {
+            CancelIoEx(directory, nullptr);
+        }
+        if (worker_.joinable()) {
+            worker_.join();
+        }
+        CloseDirectory();
+    }
+
+    bool Running() const override {
+        return running_.load();
+    }
+
+private:
+    static constexpr DWORD kBufferSize = 64 * 1024;
+
+    HANDLE DirectoryHandle() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        return directory_;
+    }
+
+    void CloseDirectory() {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (directory_ != INVALID_HANDLE_VALUE) {
+            CloseHandle(directory_);
+            directory_ = INVALID_HANDLE_VALUE;
+        }
+    }
+
+    void WatchLoop() {
+        HANDLE event = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+        if (event == nullptr) {
+            running_ = false;
+            return;
+        }
+
+        while (running_.load()) {
+            std::array<unsigned char, kBufferSize> buffer{};
+            OVERLAPPED overlapped{};
+            overlapped.hEvent = event;
+            ResetEvent(event);
+
+            HANDLE directory = DirectoryHandle();
+            if (directory == INVALID_HANDLE_VALUE) {
+                break;
+            }
+
+            const DWORD filter =
+                FILE_NOTIFY_CHANGE_FILE_NAME |
+                FILE_NOTIFY_CHANGE_DIR_NAME |
+                FILE_NOTIFY_CHANGE_SIZE |
+                FILE_NOTIFY_CHANGE_LAST_WRITE |
+                FILE_NOTIFY_CHANGE_CREATION;
+            const BOOL started = ReadDirectoryChangesW(
+                directory,
+                buffer.data(),
+                static_cast<DWORD>(buffer.size()),
+                TRUE,
+                filter,
+                nullptr,
+                &overlapped,
+                nullptr);
+            if (!started) {
+                break;
+            }
+
+            const DWORD wait_result = WaitForSingleObject(event, INFINITE);
+            if (wait_result != WAIT_OBJECT_0) {
+                CancelIoEx(directory, &overlapped);
+                break;
+            }
+
+            DWORD bytes_returned = 0;
+            if (!GetOverlappedResult(directory, &overlapped, &bytes_returned, FALSE)) {
+                if (!running_.load() || GetLastError() == ERROR_OPERATION_ABORTED) {
+                    break;
+                }
+                continue;
+            }
+            if (bytes_returned > 0) {
+                PublishBuffer(buffer, bytes_returned);
+            }
+        }
+
+        CloseHandle(event);
+        running_ = false;
+    }
+
+    void PublishBuffer(const std::array<unsigned char, kBufferSize>& buffer, DWORD bytes_returned) const {
+        const unsigned char* current = buffer.data();
+        const unsigned char* end = buffer.data() + bytes_returned;
+        while (current < end) {
+            const auto* info = reinterpret_cast<const FILE_NOTIFY_INFORMATION*>(current);
+            const std::wstring relative_path(info->FileName, info->FileNameLength / sizeof(wchar_t));
+            Publish(root_path_ / std::filesystem::path(relative_path), KindForAction(info->Action));
+            if (info->NextEntryOffset == 0) {
+                break;
+            }
+            current += info->NextEntryOffset;
+        }
+    }
+
+    static VirtualFileChangeKind KindForAction(DWORD action) {
+        switch (action) {
+        case FILE_ACTION_ADDED:
+        case FILE_ACTION_RENAMED_NEW_NAME:
+            return VirtualFileChangeKind::Created;
+        case FILE_ACTION_REMOVED:
+        case FILE_ACTION_RENAMED_OLD_NAME:
+            return VirtualFileChangeKind::Deleted;
+        default:
+            return VirtualFileChangeKind::Modified;
+        }
+    }
+
+    void Publish(const std::filesystem::path& path, VirtualFileChangeKind kind) const {
+        if (callback_ == nullptr) {
+            return;
+        }
+        callback_({
+            .file = vfs_.LocalFile(path),
+            .kind = kind,
+        });
+    }
+
+    const VirtualFileSystem& vfs_;
+    FileWatchCallback callback_;
+    std::filesystem::path root_path_;
+    mutable std::mutex mutex_;
+    HANDLE directory_ = INVALID_HANDLE_VALUE;
+    std::thread worker_;
+    std::atomic_bool running_ = false;
+};
+
 #else
 
 class UnsupportedFileWatcher final : public FileWatcher {
@@ -383,6 +582,8 @@ public:
 std::unique_ptr<FileWatcher> CreatePlatformFileWatcher(const VirtualFileSystem& vfs) {
 #if defined(__APPLE__)
     return std::make_unique<MacFileWatcher>(vfs);
+#elif defined(_WIN32)
+    return std::make_unique<WindowsFileWatcher>(vfs);
 #else
     (void)vfs;
     return std::make_unique<UnsupportedFileWatcher>();

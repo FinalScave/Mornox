@@ -33,21 +33,21 @@ LspRequestResult LspClient::Initialize(const std::filesystem::path& workspace_ro
 }
 
 LspRequestResult LspClient::Completion(const Uri& file, TextPosition position) {
-    return SendRequest("text_document/completion", TextDocumentPositionParams(file, position));
+    return SendRequest("textDocument/completion", TextDocumentPositionParams(file, position));
 }
 
 LspRequestResult LspClient::Hover(const Uri& file, TextPosition position) {
-    return SendRequest("text_document/hover", TextDocumentPositionParams(file, position));
+    return SendRequest("textDocument/hover", TextDocumentPositionParams(file, position));
 }
 
 LspRequestResult LspClient::Definition(const Uri& file, TextPosition position) {
-    return SendRequest("text_document/definition", TextDocumentPositionParams(file, position));
+    return SendRequest("textDocument/definition", TextDocumentPositionParams(file, position));
 }
 
 LspRequestResult LspClient::SemanticTokensFull(const Uri& file) {
     Value::Object params;
     params["textDocument"] = Value::ObjectValue({{"uri", Value(file.ToString())}});
-    return SendRequest("text_document/semantic_tokens/full", Value::ObjectValue(std::move(params)));
+    return SendRequest("textDocument/semanticTokens/full", Value::ObjectValue(std::move(params)));
 }
 
 void LspClient::Notify(std::string method, Value params) {

@@ -212,6 +212,17 @@ void TestLanguageSemanticApis() {
     session.Close();
 }
 
+void TestLspClientUsesStandardMethodNames() {
+    mornox::LspClient client;
+    const mornox::Uri file = mornox::Uri::Parse("file:///tmp/main.cpp");
+    const mornox::TextPosition position{.line = 0, .character = 4};
+
+    REQUIRE(client.Completion(file, position).method == "textDocument/completion");
+    REQUIRE(client.Hover(file, position).method == "textDocument/hover");
+    REQUIRE(client.Definition(file, position).method == "textDocument/definition");
+    REQUIRE(client.SemanticTokensFull(file).method == "textDocument/semanticTokens/full");
+}
+
 void TestCliceRegistersLanguageService() {
     const auto root = MakeTempRoot();
     WriteFile(root / "plugins" / "clice" / "mornox.plugin.json", R"({
@@ -263,6 +274,10 @@ TEST_CASE("Code intelligence service", "[language]") {
 
 TEST_CASE("Language semantic APIs", "[language]") {
     mornox::tests::TestLanguageSemanticApis();
+}
+
+TEST_CASE("LSP client uses standard method names", "[language][lsp]") {
+    mornox::tests::TestLspClientUsesStandardMethodNames();
 }
 
 TEST_CASE("Clice registers language service", "[language][clice]") {

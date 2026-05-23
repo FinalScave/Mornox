@@ -184,8 +184,8 @@ SemanticTokens SemanticTokensFromLsp(const LspRequestResult& result) {
 
 }
 
-LspLanguageService::LspLanguageService(std::filesystem::path server_path, std::filesystem::path workspace_root)
-    : server_path_(std::move(server_path)), workspace_root_(std::move(workspace_root)) {}
+LspLanguageService::LspLanguageService(std::filesystem::path server_path, std::filesystem::path workspace_root, std::string language_id)
+    : server_path_(std::move(server_path)), workspace_root_(std::move(workspace_root)), language_id_(std::move(language_id)) {}
 
 bool LspLanguageService::Start(std::string* error_message) {
     if (server_path_.empty()) {
@@ -212,10 +212,10 @@ void LspLanguageService::Stop() {
 void LspLanguageService::DidOpen(const TextDocument& document) {
     Value::Object text_document;
     text_document["uri"] = Value(LspUriForFile(document.file));
-    text_document["languageId"] = Value("cpp");
+    text_document["languageId"] = Value(language_id_);
     text_document["version"] = Value(static_cast<std::int64_t>(document.version));
     text_document["text"] = Value(document.text);
-    client_.Notify("text_document/didOpen", Value::ObjectValue({{"textDocument", Value::ObjectValue(std::move(text_document))}}));
+    client_.Notify("textDocument/didOpen", Value::ObjectValue({{"textDocument", Value::ObjectValue(std::move(text_document))}}));
 }
 
 void LspLanguageService::DidChange(const TextDocument& document) {
@@ -224,21 +224,21 @@ void LspLanguageService::DidChange(const TextDocument& document) {
     text_document["version"] = Value(static_cast<std::int64_t>(document.version));
     Value::Array changes;
     changes.push_back(Value::ObjectValue({{"text", Value(document.text)}}));
-    client_.Notify("text_document/didChange", Value::ObjectValue({
+    client_.Notify("textDocument/didChange", Value::ObjectValue({
         {"textDocument", Value::ObjectValue(std::move(text_document))},
         {"contentChanges", Value::ArrayValue(std::move(changes))},
     }));
 }
 
 void LspLanguageService::DidSave(const TextDocument& document) {
-    client_.Notify("text_document/didSave", Value::ObjectValue({
+    client_.Notify("textDocument/didSave", Value::ObjectValue({
         {"textDocument", Value::ObjectValue({{"uri", Value(LspUriForFile(document.file))}})},
         {"text", Value(document.text)},
     }));
 }
 
 void LspLanguageService::DidClose(const VirtualFile& file) {
-    client_.Notify("text_document/didClose", Value::ObjectValue({
+    client_.Notify("textDocument/didClose", Value::ObjectValue({
         {"textDocument", Value::ObjectValue({{"uri", Value(LspUriForFile(file))}})},
     }));
 }
